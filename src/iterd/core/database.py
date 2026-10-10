@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -15,6 +17,16 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def _ensure_sqlite_parent_dir(database_url: str) -> None:
+    """确保 SQLite 数据库文件的父目录存在（SQLite 无法在不存在的目录中建库）."""
+    parsed = urlparse(database_url)
+    if not parsed.scheme.startswith("sqlite"):
+        return
+    database = parsed.path.lstrip("/")
+    if database and database != ":memory:":
+        Path(database).parent.mkdir(parents=True, exist_ok=True)
+
+
 def get_engine(database_url: str) -> AsyncEngine:
     """创建（或复用）全局异步引擎；SQLite 启用外键与串行化抢占."""
     global _engine  # noqa: PLW0603 - 模块级单例
@@ -22,6 +34,7 @@ def get_engine(database_url: str) -> AsyncEngine:
         kwargs: dict[str, object] = {"echo": False}
         if database_url.startswith("sqlite"):
             kwargs["connect_args"] = {"timeout": 30}
+            _ensure_sqlite_parent_dir(database_url)
         _engine = create_async_engine(database_url, **kwargs)  # pyright: ignore[reportArgumentType]
     return _engine
 

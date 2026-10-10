@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -46,6 +47,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         from iterd.tasks import runner
 
         worker_task = await runner.start_in_app_worker()
+
+    if settings.backup_interval_hours > 0:
+        from iterd.core.backup import BackupError, auto_backup_if_due
+
+        try:
+            await asyncio.to_thread(auto_backup_if_due)
+        except BackupError:
+            logger.warning("启动自动备份失败，服务继续启动", exc_info=True)
+
     logger.info("iterd 启动完成 database=%s", settings.database_url)
     yield
     if worker_task is not None:
@@ -100,8 +110,10 @@ def _mount_spa(app: FastAPI) -> None:
                 try:
                     return await super().get_response(path, scope)
                 except HTTPException as exc:
-                    # starlette 0.50 未命中路径以 HTTPException(404) 抛出而非返回 404 响应
-                    if exc.status_code == 404 and not path.startswith("api/"):
+                    # starlette 0.50 未命中路径以 HTTPException(404) 抛出而非返回 404 响应；
+                    # Windows 下 path 分隔符被规范为 os.sep 且可能带前导斜杠，统一归一化后判断
+                    normalized = path.replace("\\", "/").lstrip("/")
+                    if exc.status_code == 404 and not normalized.startswith("api/"):
                         return await super().get_response("index.html", scope)
                     raise
 

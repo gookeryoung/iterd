@@ -26,6 +26,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("seed", help="注入演示数据")
 
+    backup = sub.add_parser("backup", help="创建数据备份（.tar.gz 归档）")
+    backup.add_argument("--output", default=None, help="归档输出路径，默认 ~/.iterd/backups")
+    backup.add_argument("--no-objects", action="store_true", help="不包含 objects 对象存储")
+    backup.add_argument("--keep", type=int, default=None, help="默认目录中保留的归档数上限")
+
+    restore = sub.add_parser("restore", help="从备份归档还原（数据库 + 对象存储）")
+    restore.add_argument("archive", help="备份归档路径（iterd-backup-*.tar.gz）")
+    restore.add_argument("--no-objects", action="store_true", help="不还原 objects 对象存储")
+
     sub.add_parser("info", help="查看版本与配置信息")
     return parser
 
@@ -105,8 +114,43 @@ def cmd_info() -> None:
     print(f"iterd {__version__}")
     print(f"database: {settings.database_url}")
     print(f"data_dir: {settings.data_dir}")
+    print(f"objects_dir: {settings.objects_dir}")
+    print(f"backup_dir: {settings.backup_dir}")
+    print(f"log_dir: {settings.log_dir}")
     print(f"task_worker_in_app: {settings.task_worker_in_app}")
     print(f"task_types: {registered_types() or '（启动 app 后注册）'}")
+
+
+def cmd_backup(output: str | None, no_objects: bool, keep: int | None) -> None:
+    """创建数据备份。"""
+    from pathlib import Path
+
+    from iterd.core.backup import BackupError, create_backup
+
+    try:
+        result = create_backup(
+            Path(output) if output else None,
+            include_objects=not no_objects,
+            keep=keep,
+        )
+        print(f"备份成功: {result}")
+    except BackupError as exc:
+        print(f"备份失败: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def cmd_restore(archive: str, no_objects: bool) -> None:
+    """从备份归档还原。"""
+    from pathlib import Path
+
+    from iterd.core.backup import RestoreError, restore_backup
+
+    try:
+        manifest = restore_backup(Path(archive), include_objects=not no_objects)
+        print(f"还原成功: {archive}（{manifest['database']['row_counts']}）")
+    except RestoreError as exc:
+        print(f"还原失败: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,6 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         cmd_worker(args.worker_id)
     elif args.command == "seed":
         cmd_seed()
+    elif args.command == "backup":
+        cmd_backup(args.output, args.no_objects, args.keep)
+    elif args.command == "restore":
+        cmd_restore(args.archive, args.no_objects)
     elif args.command == "info":
         cmd_info()
     return 0

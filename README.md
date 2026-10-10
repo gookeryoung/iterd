@@ -72,6 +72,9 @@ make bump patch  # 版本号 bump
 
 ## 文档
 
+- [数据目录结构说明](docs/data-directory.md)：`~/.iterd` 数据根目录与子目录职责、权限与维护要求
+- [备份还原操作手册](docs/backup-restore.md)：备份策略、`iterd backup` / `iterd restore` 操作与异常处理
+
 文档由 Sphinx 构建，托管在 ReadTheDocs：
 
 ```bash

@@ -38,14 +38,14 @@ class StorageBackend(Protocol):
 
 
 class LocalStorage:
-    """本地内容寻址存储：data/objects/{sha256[:2]}/{sha256}，版本不可变."""
+    """本地内容寻址存储：{sha256[:2]}/{sha256}，版本不可变."""
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
-        (self.root / "objects").mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True)
 
     def _object_path(self, sha256: str) -> Path:
-        return self.root / "objects" / sha256[:2] / sha256
+        return self.root / sha256[:2] / sha256
 
     def put(self, _key: str, stream: BinaryIO) -> StorageObject:
         data = stream.read()
@@ -72,12 +72,12 @@ class LocalStorage:
 
 
 def get_storage() -> LocalStorage:
-    """返回全局本地存储实例（按配置 data_dir 初始化）。"""
+    """返回全局本地存储实例（按配置 objects_dir 初始化）。"""
     from iterd.core.config import get_settings
 
     global _storage  # noqa: PLW0603 - 模块级单例
     if _storage is None:
-        _storage = LocalStorage(get_settings().data_dir)
+        _storage = LocalStorage(get_settings().objects_dir)
     return _storage
 
 
