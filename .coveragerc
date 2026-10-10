@@ -1,5 +1,7 @@
 [run]
-branch = true
+# sysmon 追踪核心：CTrace 无法追踪 TestClient portal 线程中跨线程唤醒恢复的协程（漏记路由 await 后代码）
+# Python 3.12 下 sysmon 不支持分支覆盖率，故移除 branch
+core = sysmon
 concurrency = thread
 omit = tests/*
 source = iterd

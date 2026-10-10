@@ -1,50 +1,28 @@
-# CI/容器化用 Dockerfile
-# 使用国内镜像源拉取基础镜像（如不需要可替换为官方镜像）
-# 备选镜像源前缀：docker.1ms.run / dockerpull.com / docker.xuanyuan.me
-FROM docker.m.daocloud.io/python:3.12-slim
+# iterd 生产镜像：Python 3.12 + uv 安装（含前端构建产物 src/iterd/static）
+FROM python:3.12-slim
 
-# ---- 国内镜像源 ----
-ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-ENV PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
-ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-ENV UV_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# 环境变量：非交互 + 路径配置
-ENV DEBIAN_FRONTEND=noninteractive \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
+ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_CACHE_DIR=/uv-cache \
-    UV_PROJECT_ENVIRONMENT=/opt/venv \
-    PATH="/opt/venv/bin:${PATH}"
+    PYTHONUNBUFFERED=1
 
-# 配置 apt 国内镜像（阿里云）并安装系统依赖
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        git \
-        build-essential \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
+# 先装依赖（层缓存，依赖不变不重装）
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
-# 安装 uv（国内镜像）
-RUN pip install --no-cache-dir uv -i https://mirrors.aliyun.com/pypi/simple/
+# 装项目本体（src/ 含同源托管的静态 SPA）
+COPY README.md ./
+COPY src ./src
+RUN uv sync --frozen --no-dev
 
-# 预装项目所需 Python 版本
-RUN uv python install 3.12 3.12
+# 数据目录（SQLite 与内容寻址存储挂载点）
+RUN mkdir -p /app/data
+VOLUME ["/app/data"]
 
-# 预装项目 dev 依赖（仅复制依赖描述文件，利用 Docker 层缓存）
-WORKDIR /workspace
-COPY pyproject.toml tox.ini README.md ./
-COPY src/ ./src/
+EXPOSE 8000
 
-# 同步依赖到 /opt/venv（CI 时直接复用）
-RUN uv sync --frozen --no-install-project 2>/dev/null || uv sync --no-install-project
-
-# 持久化 uv 缓存目录（CI 可挂载到宿主机加速）
-VOLUME ["/uv-cache"]
-
-# 默认入口
-CMD ["/bin/bash"]
+# 默认启动 API（compose 中 app 侧关闭内置 worker，由独立 worker 服务承担）
+CMD ["uv", "run", "--no-dev", "iterd", "serve"]

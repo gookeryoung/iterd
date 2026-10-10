@@ -26,9 +26,16 @@ coverage.xml
 .idea/
 *_profile.html
 
+# 本地协作产物（需求/迭代/规则记录，不入版本库）
+/.trae/
+
 # 环境变量与凭证（勿提交）
 .env
 .env.*
 
 # Sphinx 文档构建输出
 docs/_build/
+
+# 前端依赖
+node_modules/
+.pnpm-store/

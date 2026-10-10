@@ -1,0 +1,35 @@
+# iterd 开发形态部署：app（API+SPA）+ worker（独立任务进程），共享 data 卷
+# SQLite 单机零外部依赖；生产切 PostgreSQL 时改 ITERD_DATABASE_URL 即可
+services:
+  app:
+    build: .
+    image: iterd:latest
+    ports:
+      - "8000:8000"
+    environment:
+      ITERD_DATABASE_URL: "sqlite+aiosqlite:///./data/iterd.db"
+      ITERD_DATA_DIR: "/app/data"
+      ITERD_TASK_WORKER_IN_APP: "false"
+      ITERD_SECRET_KEY: "change-me-in-production"
+      ITERD_ADMIN_USERNAME: "admin"
+      ITERD_ADMIN_PASSWORD: "admin123"
+    volumes:
+      - iterd-data:/app/data
+    restart: unless-stopped
+
+  worker:
+    image: iterd:latest
+    build: .
+    command: ["uv", "run", "--no-dev", "iterd", "worker", "--worker-id", "worker-1"]
+    environment:
+      ITERD_DATABASE_URL: "sqlite+aiosqlite:///./data/iterd.db"
+      ITERD_DATA_DIR: "/app/data"
+      ITERD_SECRET_KEY: "change-me-in-production"
+    volumes:
+      - iterd-data:/app/data
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  iterd-data:
