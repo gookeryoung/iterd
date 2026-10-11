@@ -77,6 +77,25 @@ def _guess_content_type(filename: str) -> str:
     return CONTENT_TYPES.get(Path(filename).suffix.lower(), "application/octet-stream")
 
 
+def _coerce_literal(value: str) -> str | int | float | bool:
+    """CSV 字面量类型推断：true/false → bool，其余依次尝试 int、float，失败保留字符串。
+
+    metadata_required 检查器按类型校验元数据，而 CSV 读出的值恒为字符串，
+    需先按字面量推断类型，规则中的 number / bool 校验才有意义。
+    """
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    for cast in (int, float):
+        try:
+            return cast(value)  # type: ignore[arg-type]
+        except ValueError:
+            continue
+    return value
+
+
 async def _ensure_users(session: Any, settings: Any) -> Any:
     """确保管理员与演示用户存在，返回管理员。"""
     from iterd.plugins.accounts.services import create_user, get_by_username
@@ -208,7 +227,7 @@ async def _load_artifacts(session: Any, dataset: Path, index: dict[str, Any], ac
         )
         file_path = dataset / row["文件名"]
         metadata: dict[str, object] = {
-            k: v for k, v in metadata_rows.get(row["产物编码"], {}).items() if v and k != "产物编码"
+            k: _coerce_literal(v) for k, v in metadata_rows.get(row["产物编码"], {}).items() if v and k != "产物编码"
         }
         version = await artifact_services.upload_version(
             session,
@@ -353,13 +372,14 @@ async def _run_simulations(  # noqa: PLR0913, PLR0917 - 载入参数
     versions: dict[str, Any],
     actor_id: int,
 ) -> None:
-    """按仿真模板发起作业（绑定到横梁零件图版本）。"""
+    """按仿真模板发起作业（绑定产物与迭代取自预期检查结果）。"""
     from iterd.plugins.simulation import services as sim_services
 
-    expected = {
-        item["template_code"]: item for item in _read_json(dataset / "预期检查结果.json")["expected_simulations"]
-    }
-    iteration = index["iterations"][("CVY-2026", 2)]
+    expected_data = _read_json(dataset / "预期检查结果.json")
+    expected = {item["template_code"]: item for item in expected_data["expected_simulations"]}
+    iteration = index["iterations"][
+        (expected_data["iteration"]["project_code"], int(expected_data["iteration"]["number"]))
+    ]
     for code, item in expected.items():
         version = versions.get(item["bind_artifact_code"])
         async with factory() as session:

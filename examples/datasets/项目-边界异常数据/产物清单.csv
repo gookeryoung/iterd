@@ -1,0 +1,7 @@
+产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
+RLL-101,辊筒轴零件图,drawing,TRL-2026,1,RLL-101_revA.dxf,合规基准数据（元数据含数值与布尔类型）
+RLL-102,辊筒装配图,drawing,TRL-2026,1,RLL-102 revA.step,边界数据：文件名含空格触发 NAME-002
+RLL-103,轴承座三维模型,model,TRL-2026,1,RLL-103_revA.step,合规数据
+ZJT-101,托辊支架草图,drawing,TRL-2026,1,托辊支架草图.dwg,边界数据：中文文件名且无版本号触发 NAME-002
+SPC-101,托辊技术要求,spec,TRL-2026,1,SPC-101_revA.md,边界数据：元数据仅含设计者触发 UNIT-001/SIG-002 缺失
+CAL-101,辊筒轴强度计算书,result,TRL-2026,1,CAL-101_revA.csv,边界数据：数值/布尔字段填入文本且缺设计者

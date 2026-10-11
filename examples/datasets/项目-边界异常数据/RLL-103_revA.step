@@ -1,0 +1,29 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('托辊辊筒轴承座三维模型'),'2;1');
+FILE_NAME('RLL-103_revA.step','2026-10-11T09:30:00',('张伟'),('某机械设计院'),'iterd','iterd 0.1.0','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 -1 1 5 4 }'));
+ENDSEC;
+DATA;
+/* 坐标系 */
+#1 = CARTESIAN_POINT('原点',(0.0,0.0,0.0));
+#2 = DIRECTION('X轴',(1.0,0.0,0.0));
+#3 = DIRECTION('Y轴',(0.0,1.0,0.0));
+#4 = DIRECTION('Z轴',(0.0,0.0,1.0));
+#5 = AXIS2_PLACEMENT_3D('世界坐标系',#1,#4,#2);
+/* 轴承座 ROLL-02：铸件 φ52x80，HT250 */
+#10 = CARTESIAN_POINT('轴承座起点',(0.0,0.0,0.0));
+#11 = DIRECTION('轴承孔轴向',(0.0,0.0,1.0));
+#12 = ADVANCED_BREP_SHAPE_REPRESENTATION('轴承座本体',(#10,#11),#5);
+#13 = SHAPE_DEFINITION_REPRESENTATION('ROLL-02-1','轴承座 铸件φ52x80 HT250',#12);
+#14 = PRODUCT('ROLL-02-1','轴承座本体','HT250',(#13));
+/* 安装孔 */
+#20 = CARTESIAN_POINT('安装孔中心',(40.0,0.0,-10.0));
+#21 = DIRECTION('安装孔轴向',(0.0,0.0,1.0));
+#22 = ADVANCED_BREP_SHAPE_REPRESENTATION('安装孔1',(#20,#21),#5);
+#23 = SHAPE_DEFINITION_REPRESENTATION('ROLL-02-2','安装孔 φ11 通孔',#22);
+/* 装配关系 */
+#40 = PRODUCT_DEFINITION('托辊总成','托辊部件总成',#14);
+#41 = PRODUCT_DEFINITION_RELATIONSHIP('装配','托辊总成装配',#40,#23);
+ENDSEC;
+END-ISO-10303-21;

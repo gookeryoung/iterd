@@ -1,0 +1,14 @@
+{
+  "_comment": "规则集与迭代绑定种子数据。project_code 为 null 表示全局规则集；rule_codes 引用 规则库.json 中的 code。托辊边界检查集刻意纳入停用规则 NAME-004，用于验证停用规则被跳过且不计入 summary.rules。",
+  "rule_sets": [
+    {
+      "name": "托辊边界检查集",
+      "project_code": null,
+      "description": "全局规则集：文件名严格规范、数值/布尔类型校验与设计者登记，含 1 条停用规则（NAME-004）",
+      "rule_codes": ["NAME-002", "NAME-004", "UNIT-001", "SIG-002", "DSG-001"]
+    }
+  ],
+  "bindings": [
+    { "project_code": "TRL-2026", "iteration_number": 1, "rule_set_name": "托辊边界检查集" }
+  ]
+}

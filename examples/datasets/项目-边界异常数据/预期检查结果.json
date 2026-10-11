@@ -1,0 +1,107 @@
+{
+  "_comment": "示例数据自检基线：载入本数据集后对「TRL-2026 迭代 1」执行「托辊边界检查集」检查，CheckRun.summary 应与 expected_summary 一致（停用规则 NAME-004 不产生发现项且不计入 rules）；仿真作业按 expected_simulations 发起（模板 + 绑定产物）。挠度为长小数，基线仅给判定结论与三位近似值。",
+  "iteration": {
+    "project_code": "TRL-2026",
+    "number": 1
+  },
+  "rule_set": "托辊边界检查集",
+  "expected_summary": {
+    "error": 4,
+    "warning": 2,
+    "info": 1,
+    "artifacts": 6,
+    "rules": 4
+  },
+  "expected_findings": [
+    {
+      "rule_code": "NAME-002",
+      "severity": "error",
+      "artifact_code": "RLL-102",
+      "location": "RLL-102 revA.step",
+      "message_contains": "不符合规范"
+    },
+    {
+      "rule_code": "NAME-002",
+      "severity": "error",
+      "artifact_code": "ZJT-101",
+      "location": "托辊支架草图.dwg",
+      "message_contains": "不符合规范"
+    },
+    {
+      "rule_code": "UNIT-001",
+      "severity": "error",
+      "artifact_code": "CAL-101",
+      "location": "metadata",
+      "message_contains": "类型应为 number"
+    },
+    {
+      "rule_code": "UNIT-001",
+      "severity": "error",
+      "artifact_code": "SPC-101",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据"
+    },
+    {
+      "rule_code": "SIG-002",
+      "severity": "warning",
+      "artifact_code": "CAL-101",
+      "location": "metadata",
+      "message_contains": "类型应为 bool"
+    },
+    {
+      "rule_code": "SIG-002",
+      "severity": "warning",
+      "artifact_code": "SPC-101",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据"
+    },
+    {
+      "rule_code": "DSG-001",
+      "severity": "info",
+      "artifact_code": "CAL-101",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据: 设计者"
+    }
+  ],
+  "expected_simulations": [
+    {
+      "template_code": "TRL-LIGHT-CHECK",
+      "bind_artifact_code": "RLL-101",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": {
+        "max_stress": 69.12,
+        "deflection": "≈0.805",
+        "safety_factor": "≈5.136"
+      }
+    },
+    {
+      "template_code": "TRL-NOMINAL-CHECK",
+      "bind_artifact_code": "RLL-101",
+      "verdict": "fail",
+      "failed_keys": [
+        "deflection"
+      ],
+      "metrics_hint": {
+        "max_stress": 115.2,
+        "deflection": "≈1.342",
+        "safety_factor": "≈3.082"
+      }
+    },
+    {
+      "template_code": "TRL-OVERLOAD-CHECK",
+      "bind_artifact_code": "RLL-101",
+      "verdict": "fail",
+      "failed_keys": [
+        "max_stress",
+        "deflection",
+        "safety_factor"
+      ],
+      "metrics_hint": {
+        "max_stress": 259.2,
+        "deflection": "≈3.020",
+        "safety_factor": "≈1.370"
+      }
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "_comment": "托辊辊筒轴仿真模板种子数据。solver_type 取自 GET /api/v1/solvers；thresholds 形如 {指标: {min|max}}。三个模板共用辊筒轴几何（45钢 φ25x600）与阈值，仅载荷不同，覆盖 pass / 单指标超阈 fail / 全指标超阈 fail 三种判定结论。指标由 beam_static 求解器按材料力学公式计算：max_stress=1.5*P*L/(b*h^2)，deflection=P*L^3/(48*E*I)，safety_factor=Rs/max_stress。",
+  "geometry": {
+    "_comment": "辊筒轴 ROLL-01：φ25 圆轴简化为 25x25 方截面，跨距 600mm，45钢",
+    "length": 600,
+    "width": 25,
+    "height": 25,
+    "modulus": 206000,
+    "yield_strength": 355
+  },
+  "thresholds": {
+    "_comment": "许用应力 160MPa；挠度按 1.3mm 控制；安全系数不低于 1.5",
+    "max_stress": {
+      "max": 160
+    },
+    "deflection": {
+      "max": 1.3
+    },
+    "safety_factor": {
+      "min": 1.5
+    }
+  },
+  "templates": [
+    {
+      "code": "TRL-LIGHT-CHECK",
+      "name": "辊筒轴轻载校核",
+      "solver_type": "beam_static",
+      "project_code": "TRL-2026",
+      "description": "轻载 1200N：max_stress=69.12MPa、deflection≈0.805mm、n≈5.136，三项均满足阈值，结论 pass",
+      "params": {
+        "load": 1200,
+        "length": 600,
+        "width": 25,
+        "height": 25,
+        "modulus": 206000,
+        "yield_strength": 355
+      },
+      "thresholds": {
+        "max_stress": {
+          "max": 160
+        },
+        "deflection": {
+          "max": 1.3
+        },
+        "safety_factor": {
+          "min": 1.5
+        }
+      }
+    },
+    {
+      "code": "TRL-NOMINAL-CHECK",
+      "name": "辊筒轴额定校核",
+      "solver_type": "beam_static",
+      "project_code": "TRL-2026",
+      "description": "额定载荷 2000N：max_stress=115.2MPa 满足、deflection≈1.342mm 超 1.3mm 控制值（单指标超阈）、n≈3.082 满足，结论 fail（部分超阈）",
+      "params": {
+        "load": 2000,
+        "length": 600,
+        "width": 25,
+        "height": 25,
+        "modulus": 206000,
+        "yield_strength": 355
+      },
+      "thresholds": {
+        "max_stress": {
+          "max": 160
+        },
+        "deflection": {
+          "max": 1.3
+        },
+        "safety_factor": {
+          "min": 1.5
+        }
+      }
+    },
+    {
+      "code": "TRL-OVERLOAD-CHECK",
+      "name": "辊筒轴超载校核",
+      "solver_type": "beam_static",
+      "project_code": "TRL-2026",
+      "description": "超载 4500N：max_stress=259.2MPa 超许用、deflection≈3.020mm 超控制值、n≈1.370 低于要求，三项均超阈，结论 fail",
+      "params": {
+        "load": 4500,
+        "length": 600,
+        "width": 25,
+        "height": 25,
+        "modulus": 206000,
+        "yield_strength": 355
+      },
+      "thresholds": {
+        "max_stress": {
+          "max": 160
+        },
+        "deflection": {
+          "max": 1.3
+        },
+        "safety_factor": {
+          "min": 1.5
+        }
+      }
+    }
+  ]
+}

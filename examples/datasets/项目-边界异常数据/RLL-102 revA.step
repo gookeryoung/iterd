@@ -1,0 +1,14 @@
+本文件为"边界数据"示例：文件名含空格（正确写法应为 RLL-102_revA.step），
+用于演示 filename_convention 检查器对空格等非法字符的判定，真实 STEP 为文本中性格式。
+
+文件内容沿用 RLL-103 的结构风格，描述托辊装配体。
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('托辊装配图（文件名含空格的边界样本）'),'2;1');
+FILE_NAME('RLL-102 revA.step','2026-10-11T09:35:00',('张伟'),('某机械设计院'),'iterd','iterd 0.1.0','');
+ENDSEC;
+DATA;
+#1 = CARTESIAN_POINT('原点',(0.0,0.0,0.0));
+#2 = PRODUCT_DEFINITION('托辊装配','托辊装配体 132x74 截面',#1);
+ENDSEC;
+END-ISO-10303-21;

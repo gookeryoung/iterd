@@ -8,7 +8,8 @@ examples/
 ├── README.md                      本文件
 ├── backups/                       备份归档样本（iterd-backup-<版本>-v1-<UTC时间戳>.tar.gz）
 └── datasets/
-    └── 项目-某型输送机机架结构设计/   典型工程设计项目数据集
+    ├── 项目-某型输送机机架结构设计/   典型工程设计项目数据集
+    └── 项目-边界异常数据/            边界与异常场景数据集
 ```
 
 ## 数据集：某型带式输送机机架结构设计
@@ -50,6 +51,49 @@ examples/
 - 仿真：`BEAM-STATIC-CHECK`（8000N）结论 `pass`；`BEAM-HEAVY-CHECK`（15000N）三项指标全部超阈，结论 `fail`。
 - 完整基线见 `预期检查结果.json`。
 
+## 数据集：某型带式输送机托辊组件开发（边界异常数据）
+
+场景：带宽 1000mm 带式输送机托辊组件开发，含 2 个项目（父子）、3 个迭代（active / planned / 子项目 active）、
+6 个产物、5 条规则（含 1 条停用）、1 个规则集、3 个仿真模板，
+专门覆盖文件名异常、元数据类型错误与字段缺失、planned 迭代、viewer 成员、
+子项目基线与三种仿真判定结论（pass / 单指标超阈 / 全指标超阈）等边界场景。
+14 个边界场景的完整清单见数据集内 `边界场景说明.csv`。
+
+### 元数据定义（可直接映射到 API 入参）
+
+| 文件 | 说明 |
+| --- | --- |
+| `项目结构.json` | 项目树、成员角色（含 admin 以 viewer 参与）、迭代（含 planned 状态）、子项目基线 |
+| `规则库.json` | 规则条目：含 `enabled=false` 停用规则（NAME-004）与 number/bool 类型校验规则 |
+| `规则集.json` | 规则集成员（含停用规则）与迭代绑定关系 |
+| `仿真模板.json` | 三个载荷档位模板共用辊筒轴几何与阈值 |
+| `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
+| `产物元数据.csv` | 各产物版本的元数据（数值/布尔字段刻意含类型错误样本） |
+| `边界场景说明.csv` | 边界场景清单：编号、类别、数据特征、预期表现 |
+| `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
+| `预期检查结果.json` | 自检基线：检查汇总、发现项与三种仿真结论的期望值 |
+
+### 产物实体文件（上传用）
+
+| 文件 | 类别 | 说明 |
+| --- | --- | --- |
+| `RLL-101_revA.dxf` | drawing | 合规基准数据（元数据含数值 4.2 与布尔 true） |
+| `RLL-102 revA.step` | drawing | **边界数据**：文件名含空格，触发 NAME-002 |
+| `RLL-103_revA.step` | model | 合规 STEP 中性格式 |
+| `托辊支架草图.dwg` | drawing | **边界数据**：中文文件名且无版本号，触发 NAME-002 |
+| `SPC-101_revA.md` | spec | **边界数据**：元数据仅含设计者，触发缺失类 error + warning |
+| `CAL-101_revA.csv` | result | **边界数据**：重量kg=约4.2、会签完成=已会签（类型错误）且缺设计者 |
+
+### 预期结果
+
+- 迭代 1 执行「托辊边界检查集」后 `CheckRun.summary` 应为
+  `{"error": 4, "warning": 2, "info": 1, "artifacts": 6, "rules": 4}`；
+  7 条发现项：文件名不规范 2 条（error）、数值类型错误 1 条（error）、布尔类型错误 1 条（warning）、
+  元数据缺失 2 条（error + warning）、缺设计者 1 条（info）；停用规则 NAME-004 不产生发现项且不计入 rules。
+- 仿真（绑定 RLL-101）：`TRL-LIGHT-CHECK`（1200N）`pass`；
+  `TRL-NOMINAL-CHECK`（2000N）仅挠度单指标超阈 `fail`；`TRL-OVERLOAD-CHECK`（4500N）三项全部超阈 `fail`。
+- 完整基线见 `预期检查结果.json`。
+
 ## 使用方式
 
 ### 1. 载入示例数据
@@ -63,6 +107,9 @@ uv run python scripts/load_example.py --data-dir .iterd-example --with-check
 
 # 载入指定数据集
 uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机机架结构设计
+
+# 载入边界异常数据集（完整链路：检查 + 仿真）
+uv run python scripts/load_example.py --dataset examples/datasets/项目-边界异常数据 --with-check --with-sim
 ```
 
 脚本幂等：项目/规则/规则集/仿真模板按编码或名称跳过已存在记录。

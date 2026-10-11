@@ -1,0 +1,76 @@
+{
+    "_comment": "某型带式输送机托辊组件开发 —— 边界与异常场景种子数据。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py --dataset 载入。本数据集专用于覆盖规则检查的类型校验、禁用规则、planned 迭代、viewer 成员与子项目基线等边界场景。",
+    "project": {
+        "code": "TRL-2026",
+        "name": "某型带式输送机托辊组件开发",
+        "description": "带宽 1000mm 带式输送机的托辊组件开发，数据集刻意包含文件名异常、元数据类型错误、字段缺失等边界数据，用于演示规则检查与仿真判定的边界行为。",
+        "status": "active"
+    },
+    "sub_projects": [
+        {
+            "code": "TRL-2026-ROLL",
+            "name": "辊筒组件子项",
+            "description": "辊筒轴、轴承座等转动部件设计（验证父项目角色继承与子项目基线）。",
+            "status": "active",
+            "parent_code": "TRL-2026"
+        }
+    ],
+    "members": [
+        {
+            "username": "designer",
+            "project_code": "TRL-2026",
+            "role": "designer"
+        },
+        {
+            "username": "reviewer",
+            "project_code": "TRL-2026",
+            "role": "reviewer"
+        },
+        {
+            "username": "admin",
+            "project_code": "TRL-2026",
+            "role": "viewer"
+        },
+        {
+            "username": "designer",
+            "project_code": "TRL-2026-ROLL",
+            "role": "designer"
+        }
+    ],
+    "iterations": [
+        {
+            "number": 1,
+            "project_code": "TRL-2026",
+            "title": "边界数据校核",
+            "objective": "对含文件名异常、元数据类型错误与字段缺失的产物执行规则检查，验证发现项判定边界",
+            "start_date": "2026-09-15",
+            "end_date": "2026-10-31",
+            "status": "active"
+        },
+        {
+            "number": 2,
+            "project_code": "TRL-2026",
+            "title": "批量生产准备",
+            "objective": "planned 状态边界场景：尚未启动的迭代，载入后应保持 planned 不被推进",
+            "start_date": "2026-11-01",
+            "end_date": "2026-11-30",
+            "status": "planned"
+        },
+        {
+            "number": 1,
+            "project_code": "TRL-2026-ROLL",
+            "title": "辊筒轴详细设计",
+            "objective": "子项目独立迭代，承载辊筒轴仿真校核模板与无产物基线",
+            "start_date": "2026-09-20",
+            "end_date": "2026-10-25",
+            "status": "active"
+        }
+    ],
+    "baselines": [
+        {
+            "project_code": "TRL-2026-ROLL",
+            "iteration_number": 1,
+            "name": "BL-辊筒轴详设基线"
+        }
+    ]
+}

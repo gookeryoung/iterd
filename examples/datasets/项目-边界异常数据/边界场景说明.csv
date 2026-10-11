@@ -1,0 +1,15 @@
+场景编号,类别,数据特征,涉及对象,预期表现
+EDG-01,文件名,文件名含空格（RLL-102 revA.step）,RLL-102,NAME-002 报 error 不符合规范
+EDG-02,文件名,文件名含中文且无版本号（托辊支架草图.dwg）,ZJT-101,NAME-002 报 error 不符合规范
+EDG-03,规则状态,规则集纳入 enabled=false 的停用规则,NAME-004,检查跳过该规则且不计入 summary.rules
+EDG-04,元数据类型,数值字段填入中文文本（重量kg=约4.2）,CAL-101,UNIT-001 报 error 类型应为 number
+EDG-05,元数据类型,布尔字段填入文本（会签完成=已会签）,CAL-101,SIG-002 报 warning 类型应为 bool
+EDG-06,元数据缺失,元数据仅含设计者其余全空,SPC-101,UNIT-001 报 error 且 SIG-002 报 warning 缺少必填元数据
+EDG-07,元数据缺失,缺失可选字段（设计者）,CAL-101,DSG-001 报 info 缺少必填元数据
+EDG-08,状态机,planned 状态迭代（批量生产准备）,TRL-2026 迭代2,载入后保持 planned 状态不被推进
+EDG-09,RBAC,管理员以 viewer 角色参与项目,admin@TRL-2026,仅只读权限（可查看不可上传与发起检查）
+EDG-10,RBAC,子项目无独立成员时继承父项目角色,designer@TRL-2026-ROLL,继承 designer 权限
+EDG-11,基线,无产物迭代上建立基线,BL-辊筒轴详设基线,基线建立成功且基线条目为空
+EDG-12,仿真,全指标满足阈值,TRL-LIGHT-CHECK,结论 pass
+EDG-13,仿真,仅挠度单指标超阈（1.342 超 1.3 控制值）,TRL-NOMINAL-CHECK,结论 fail 且 failed_keys 仅含 deflection
+EDG-14,仿真,应力/挠度/安全系数三项全超阈,TRL-OVERLOAD-CHECK,结论 fail 且 failed_keys 含全部指标

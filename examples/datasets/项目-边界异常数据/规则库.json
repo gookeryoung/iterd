@@ -1,0 +1,55 @@
+{
+  "_comment": "托辊边界场景规则库种子数据。checker_type 取值须为 GET /api/v1/checkers 已注册检查器；NAME-004 为 enabled=false 的停用规则，用于验证停用规则不产生发现项且不计入 summary.rules；UNIT-001 / SIG-002 分别验证 number / bool 类型校验。",
+  "rules": [
+    {
+      "code": "NAME-002",
+      "name": "图纸编码文件名规范",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z]{3}-\\d{3}_rev[A-Z]\\.\\w+$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "产物文件名须严格形如 ABC-001_revX.ext（字母开头三段编码-三位数字），含空格或中文即判错"
+    },
+    {
+      "code": "NAME-004",
+      "name": "历史命名规范（已停用）",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z]+_rev[A-Z]\\.\\w+$" },
+      "severity_default": "warning",
+      "enabled": false,
+      "description": "已被 NAME-002 取代：规则集内含停用规则时，检查应跳过且不计入 rules 计数"
+    },
+    {
+      "code": "UNIT-001",
+      "name": "元数据数值类型校验",
+      "category": "material",
+      "checker_type": "metadata_required",
+      "params": { "required": { "重量kg": "number", "数量": "number" } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "重量与数量须为数值类型，填入中文或带单位文本时判类型错误"
+    },
+    {
+      "code": "SIG-002",
+      "name": "会签状态登记",
+      "category": "process",
+      "checker_type": "metadata_required",
+      "params": { "required": { "会签完成": "bool" } },
+      "severity_default": "warning",
+      "enabled": true,
+      "description": "会签完成须为布尔值（true/false），填入「已会签」等文本时判类型错误"
+    },
+    {
+      "code": "DSG-001",
+      "name": "设计者登记",
+      "category": "process",
+      "checker_type": "metadata_required",
+      "params": { "required": { "设计者": "str" } },
+      "severity_default": "info",
+      "enabled": true,
+      "description": "每份产物须登记设计者姓名"
+    }
+  ]
+}
