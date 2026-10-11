@@ -44,3 +44,7 @@ docs/_build/
 # 前端依赖
 node_modules/
 .pnpm-store/
+
+# 前端构建产物（iterd build 生成，随构建变动不入库；仅保留目录占位）
+/src/iterd/static/*
+!/src/iterd/static/.gitkeep
