@@ -29,6 +29,7 @@ coverage.xml
 # 本地协作产物（需求/迭代/规则/记忆记录，不入版本库）
 /.trae/
 /.workbuddy/
+/.claude/
 
 # 示例数据载入脚本生成的运行态数据目录
 .iterd-example/
