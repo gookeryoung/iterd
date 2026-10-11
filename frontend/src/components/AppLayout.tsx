@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { Avatar, Dropdown, Layout, Menu, Space, Typography, theme } from 'antd';
 import {
   AuditOutlined,
+  DeploymentUnitOutlined,
   ExperimentOutlined,
   LogoutOutlined,
   ProjectOutlined,
@@ -20,6 +21,7 @@ const { Sider, Header, Content } = Layout;
 const MENU_ITEMS = [
   { key: '/', icon: <ProjectOutlined />, label: '项目管理' },
   { key: '/rules', icon: <ExperimentOutlined />, label: '规则库' },
+  { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '审查模板' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
 ];
 
@@ -27,6 +29,9 @@ const MENU_ITEMS = [
 function resolveSelectedKey(pathname: string): string {
   if (pathname.startsWith('/rules')) {
     return '/rules';
+  }
+  if (pathname.startsWith('/workflows')) {
+    return '/workflows';
   }
   if (pathname.startsWith('/audit')) {
     return '/audit';

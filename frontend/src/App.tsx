@@ -8,6 +8,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import IterationDetailPage from './pages/IterationDetailPage';
 import RulesPage from './pages/RulesPage';
+import WorkflowTemplatesPage from './pages/WorkflowTemplatesPage';
 import AuditPage from './pages/AuditPage';
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route path="/iterations/:id" element={<IterationDetailPage />} />
           <Route path="/rules" element={<RulesPage />} />
+          <Route path="/workflows" element={<WorkflowTemplatesPage />} />
           <Route path="/audit" element={<AuditPage />} />
         </Route>
       </Route>

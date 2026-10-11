@@ -414,6 +414,114 @@ export interface AuditLog {
   created_at: string;
 }
 
+// ---- 审查流水线（workflows）----
+
+/** 审查运行状态。 */
+export type WorkflowRunStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+
+/** 流水线作业状态。 */
+export type WorkflowJobStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
+
+/** 作业结论（GitHub Actions 语义）。 */
+export type WorkflowConclusion = 'success' | 'failure' | 'skipped';
+
+/** 解析后的作业定义（模板详情展示）。 */
+export interface WorkflowJobDef {
+  key: string;
+  name: string;
+  uses: string;
+  needs: string[];
+  with: Record<string, unknown>;
+}
+
+/** 审查模板（YAML 编排）。 */
+export interface WorkflowTemplate {
+  id: number;
+  project_id: number | null;
+  code: string;
+  name: string;
+  description: string;
+  definition: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  jobs: WorkflowJobDef[];
+}
+
+/** 审查模板创建入参。 */
+export interface WorkflowTemplateInput {
+  code: string;
+  name: string;
+  description?: string;
+  project_id?: number | null;
+  definition: string;
+  enabled?: boolean;
+}
+
+/** 审查模板更新入参（部分更新）。 */
+export interface WorkflowTemplateUpdateInput {
+  name?: string;
+  description?: string;
+  definition?: string;
+  enabled?: boolean;
+}
+
+/** 流水线作业日志行。 */
+export interface WorkflowJobLog {
+  level: string;
+  message: string;
+}
+
+/** 流水线作业（含绑定展示字段）。 */
+export interface WorkflowJob {
+  id: number;
+  run_id: number;
+  job_key: string;
+  name: string;
+  job_type: 'rules' | 'simulation';
+  needs: string[] | null;
+  config: Record<string, unknown> | null;
+  status: WorkflowJobStatus;
+  conclusion: WorkflowConclusion | null;
+  check_run_id: number | null;
+  sim_job_id: number | null;
+  logs: WorkflowJobLog[] | null;
+  order_index: number;
+  started_at: string | null;
+  finished_at: string | null;
+  rule_set_name: string;
+  template_code: string;
+  template_name: string;
+  solver_type: string;
+  artifact_code: string;
+  version_no: number | null;
+}
+
+/** 运行汇总（结论与计数聚合）。 */
+export interface WorkflowRunSummary {
+  conclusion: WorkflowConclusion;
+  jobs: { success: number; failure: number; skipped: number };
+  findings: { error: number; warning: number; info: number };
+  sims: { pass: number; fail: number };
+}
+
+/** 审查运行（含作业概要）。 */
+export interface WorkflowRun {
+  id: number;
+  iteration_id: number;
+  workflow_id: number;
+  workflow_code: string;
+  definition: string;
+  status: WorkflowRunStatus;
+  summary: WorkflowRunSummary | null;
+  created_by: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  task_id: number | null;
+  jobs: WorkflowJob[];
+}
+
 /** 严重级别中文标签映射。 */
 export const SEVERITY_LABELS: Record<Severity, string> = {
   error: '错误',

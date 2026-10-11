@@ -26,13 +26,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """启动：alembic 迁移至最新 → 确保管理员 → 进程内 worker."""
     settings = get_settings()
     # 导入全部模型确保 metadata 完整（迁移 env.py 自行导入，此处供种子与 worker 使用）
-    from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace  # noqa: F401
+    from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace, workflows  # noqa: F401
     from iterd.plugins.rules import services as rule_services
     from iterd.plugins.simulation import services as sim_services
+    from iterd.plugins.workflows import services as workflow_services
     from iterd.tasks import models as task_models  # noqa: F401
 
     rule_services.register_executors()
     sim_services.register_executors()
+    workflow_services.register_executors()
 
     # lifespan 自动迁移（cndb 模式）：同步执行，含存量 create_all 库 stamp 兼容
     from iterd.core.migrations import upgrade_head
@@ -83,6 +85,7 @@ def create_app() -> FastAPI:
     from iterd.plugins.rules import routers as rules_routers
     from iterd.plugins.simulation import routers as simulation_routers
     from iterd.plugins.trace import routers as trace_routers
+    from iterd.plugins.workflows import routers as workflows_routers
     from iterd.tasks import api as tasks_api
 
     app.include_router(accounts_routers.router)
@@ -93,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(simulation_routers.router)
     app.include_router(trace_routers.router)
     app.include_router(notify_routers.router)
+    app.include_router(workflows_routers.router)
     app.include_router(tasks_api.router)
 
     static_dir = Path(__file__).parent / "static"

@@ -238,13 +238,14 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
         cases = await load_all_cases(session, actor_id=admin.id)
         for case in cases:
             logger.info(
-                "[seed] 典型案例 %s：项目 %s / 迭代 %s / 产物 %s / 检查 %s / 仿真 %s",
+                "[seed] 典型案例 %s：项目 %s / 迭代 %s / 产物 %s / 检查 %s / 仿真 %s / 流水线 %s",
                 case["name"],
                 case["projects"],
                 case["iterations"],
                 case["artifacts"],
                 len(case["checks"]),
                 len(case["sims"]),
+                len(case["workflows"]),
             )
 
     logger.info("[seed] 演示数据注入完成：共 %s 个账号（三员 + 普通用户）", len(summary))

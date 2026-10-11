@@ -1,0 +1,60 @@
+# 审查模板种子数据。definition 为工作流 YAML 文本（GitHub Actions 语法子集：jobs/uses/needs/with）；
+# project_code 为 null 表示全局模板；runs 为 seed 预执行的运行绑定（project_code + iteration_number + workflow_code）。
+# 本数据集演示全绿链路：传动轴扭转校核（pass）→ 立柱稳定性校核（pass），两级 needs 依序执行，
+# 整条流水线结论 success（对齐 GitHub Actions 的成功流水线展示）。
+templates:
+  - code: AXLE-REVIEW
+    name: 传动系统审查流水线
+    project_code: AXLE-2026
+    description: 传动轴扭转校核通过后执行中间立柱稳定性校核；额定工况下两级校核均满足阈值，流水线全绿
+    definition: |
+      name: 传动系统审查
+      description: 传动轴扭转校核通过后执行立柱稳定性校核
+
+      jobs:
+        shaft-sim:
+          name: 传动轴扭转校核（额定）
+          uses: simulation/run
+          with:
+            template: SHAFT-NOMINAL-CHECK
+            artifact: SHF-301
+        column-sim:
+          name: 立柱稳定性校核（标准段）
+          needs: shaft-sim
+          uses: simulation/run
+          with:
+            template: COL-STABILITY-CHECK
+            artifact: COL-301
+  - code: AXLE-REVIEW-GATED
+    name: 传动系统审查（含规则门禁）
+    project_code: AXLE-2026
+    description: 演示规则门禁链路：当前迭代存在编码与重量等级 error 级发现项，规则检查判 failure 后两级仿真均被跳过
+    enabled: false
+    definition: |
+      name: 传动系统门禁审查
+      description: 静态规则检查通过后才执行仿真
+
+      jobs:
+        rules-check:
+          name: 静态规则检查
+          uses: rules/check
+          with:
+            rule_set: 传动系统设计规范
+        shaft-sim:
+          name: 传动轴扭转校核（额定）
+          needs: rules-check
+          uses: simulation/run
+          with:
+            template: SHAFT-NOMINAL-CHECK
+            artifact: SHF-301
+        column-sim:
+          name: 立柱稳定性校核（标准段）
+          needs: shaft-sim
+          uses: simulation/run
+          with:
+            template: COL-STABILITY-CHECK
+            artifact: COL-301
+runs:
+  - project_code: AXLE-2026
+    iteration_number: 2
+    workflow_code: AXLE-REVIEW

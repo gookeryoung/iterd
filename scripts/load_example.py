@@ -33,6 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--database-url", default=None, help="覆盖数据库连接串")
     parser.add_argument("--with-check", action="store_true", help="载入后对绑定迭代执行规则检查")
     parser.add_argument("--with-sim", action="store_true", help="载入后按仿真模板发起作业")
+    parser.add_argument("--with-workflow", action="store_true", help="载入后按审查模板发起流水线运行")
     return parser
 
 
@@ -40,8 +41,9 @@ async def _wait_terminal(factory: Any, kind: str, entity_id: int) -> dict[str, A
     """轮询至终态并返回最新状态（worker 异步执行）。"""
     from iterd.plugins.rules.models import CheckRun
     from iterd.plugins.simulation.models import SimJob
+    from iterd.plugins.workflows.models import WorkflowRun
 
-    model = CheckRun if kind == "check" else SimJob
+    model = {"check": CheckRun, "sim": SimJob, "workflow": WorkflowRun}[kind]
     for _ in range(120):
         async with factory() as session:
             entity = await session.get(model, entity_id)
@@ -104,6 +106,30 @@ async def _run_simulations(
         print(f"仿真作业 #{job_id}（{code}）：{state['status']} {state['summary']} {state['error'] or ''}")
 
 
+async def _run_workflows(factory: Any, dataset: Path, index: dict[str, Any], workflows: dict[str, Any]) -> None:
+    """按审查模板发起流水线运行（进程内 worker，进度与界面一致）。"""
+    from iterd.example_datasets import read_yaml
+    from iterd.plugins.workflows import services as workflow_services
+
+    path = dataset / "审查模板.yaml"
+    if not path.is_file():
+        return
+    for run in read_yaml(path).get("runs", []):
+        iteration = index["iterations"][(run["project_code"], int(run["iteration_number"]))]
+        async with factory() as session:
+            workflow_run, _task = await workflow_services.create_workflow_run(
+                session,
+                actor_id=1,
+                iteration_id=iteration.id,
+                template_id=workflows[run["workflow_code"]].id,
+            )
+            await session.commit()
+            run_id = workflow_run.id
+        state = await _wait_terminal(factory, "workflow", run_id)
+        conclusion = (state["summary"] or {}).get("conclusion", "-")
+        print(f"审查运行 #{run_id}（{run['workflow_code']}）：{state['status']} conclusion={conclusion}")
+
+
 async def _load(dataset: Path, args: argparse.Namespace) -> None:
     """主载入流程。"""
     from iterd.core.config import get_settings
@@ -112,10 +138,11 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     from iterd.example_datasets import DEMO_USERS, load_dataset
 
     # 触发全部模型注册（含 simulation 与 tasks）
-    from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace  # noqa: F401
+    from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace, workflows  # noqa: F401
     from iterd.plugins.accounts.services import get_by_username
     from iterd.plugins.rules import services as rule_services
     from iterd.plugins.simulation import services as sim_services
+    from iterd.plugins.workflows import services as workflow_services
     from iterd.seed import ensure_admin
     from iterd.tasks import models as task_models  # noqa: F401
     from iterd.tasks import runner
@@ -129,9 +156,10 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     print(f"数据库: {settings.database_url}")
 
     worker = None
-    if args.with_check or args.with_sim:
+    if args.with_check or args.with_sim or args.with_workflow:
         rule_services.register_executors()
         sim_services.register_executors()
+        workflow_services.register_executors()
         worker = await runner.start_in_app_worker()
 
     try:
@@ -148,10 +176,11 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
             assert admin is not None
             loaded = await load_dataset(session, dataset, actor_id=admin.id)
         index, sets, templates, versions = loaded["index"], loaded["sets"], loaded["templates"], loaded["versions"]
+        workflows = loaded["workflows"]
         print(
             f"项目 {len(index['projects'])} 个 / 迭代 {len(index['iterations'])} 个 / "
             f"产物 {len(versions)} 个 / 规则 {len(loaded['rules'])} 条 / "
-            f"规则集 {len(sets)} 个 / 模板 {len(templates)} 个"
+            f"规则集 {len(sets)} 个 / 模板 {len(templates)} 个 / 审查模板 {len(workflows)} 个"
         )
         print(f"用户就绪: {settings.admin_username} / {' / '.join(DEMO_USERS)}")
 
@@ -159,6 +188,8 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
             await _run_checks(factory, dataset, index, sets)
         if args.with_sim:
             await _run_simulations(factory, dataset, index, templates, versions)
+        if args.with_workflow:
+            await _run_workflows(factory, dataset, index, workflows)
     finally:
         if worker is not None:
             await runner.stop_in_app_worker(worker)

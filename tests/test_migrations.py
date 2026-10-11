@@ -8,9 +8,15 @@ import sys
 from pathlib import Path
 
 import sqlalchemy as sa
+from alembic.script import ScriptDirectory
 
 from iterd.core.config import get_settings
-from iterd.core.migrations import to_sync_url, upgrade_head
+from iterd.core.migrations import build_config, to_sync_url, upgrade_head
+
+
+def _head_revision() -> str:
+    """当前迁移 head 版本号（断言用，避免新增迁移后改测试）。"""
+    return str(ScriptDirectory.from_config(build_config()).get_current_head())
 
 
 def _sync_url() -> str:
@@ -48,7 +54,7 @@ def test_upgrade_head_creates_all_tables_and_idempotent(env: Path) -> None:
 def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
     """存量 create_all 库（有业务表、无 alembic_version）自动 stamp 基线后升级成功.
 
-    模拟 0001 时代库结构（users 无 role 列），stamp 0001 后升级到 0002 补齐 role 列。
+    模拟 0001 时代库结构（users 无 role 列），stamp 0001 后升级到最新补齐全部增量。
     """
     import asyncio
 
@@ -81,7 +87,7 @@ def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
             columns = {c["name"] for c in sa.inspect(conn).get_columns("users")}
     finally:
         engine.dispose()
-    assert version == "0002"
+    assert version == _head_revision()
     assert "role" in columns
 
 
@@ -89,7 +95,7 @@ def test_load_example_db_is_versioned_and_serve_ready(tmp_path: Path) -> None:
     """载入脚本建库走 alembic（E2E 回归）：库带版本号，serve 启动迁移幂等.
 
     修复前 create_all 建出"当前结构但无 alembic_version"的库，
-    serve 启动 stamp 0001 后升级 0002，因 users.role 列已存在而崩溃。
+    serve 启动 stamp 基线后升级，因 users.role 列已存在而崩溃。
     """
     repo_root = Path(__file__).resolve().parents[1]
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'example' / 'iterd.db'}"
@@ -119,7 +125,7 @@ def test_load_example_db_is_versioned_and_serve_ready(tmp_path: Path) -> None:
             version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
     finally:
         engine.dispose()
-    assert version == "0002"
+    assert version == _head_revision()
 
     # serve 启动路径（lifespan 自动迁移）在该库上幂等无异常
     upgrade_head(db_url)

@@ -7,6 +7,7 @@ import { Link, useParams } from 'react-router-dom';
 import { fetchIteration } from '../api/projects';
 import { IterationStatusTag } from '../components/StatusTags';
 import ArtifactTab from '../components/ArtifactTab';
+import WorkflowsTab from '../components/WorkflowsTab';
 import CheckTab from '../components/CheckTab';
 import SimTab from '../components/SimTab';
 import BaselineTab from '../components/BaselineTab';
@@ -65,6 +66,13 @@ export default function IterationDetailPage() {
             key: 'artifacts',
             label: '产物',
             children: <ArtifactTab iterationId={iterationId} />,
+          },
+          {
+            key: 'workflows',
+            label: '审查流水线',
+            children: (
+              <WorkflowsTab iterationId={iterationId} projectId={iteration.project_id} />
+            ),
           },
           {
             key: 'checks',

@@ -11,10 +11,11 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # 产物扩展名 → 上传时的 content_type（存储与预览类型解析用）
@@ -66,6 +67,11 @@ def read_csv(path: Path) -> list[dict[str, str]]:
     """读取数据集 CSV 文件（utf-8-sig，首行为表头）。"""
     with path.open(encoding="utf-8-sig", newline="") as handle:
         return [dict(row) for row in csv.DictReader(handle)]
+
+
+def read_yaml(path: Path) -> dict[str, Any]:
+    """读取数据集 YAML 文件（utf-8-sig；审查模板.yaml 用）。"""
+    return yaml.safe_load(path.read_text(encoding="utf-8-sig"))  # type: ignore[no-any-return]
 
 
 def _as_date(value: str | None) -> date | None:
@@ -311,14 +317,47 @@ async def load_sim_templates(
     return templates
 
 
+async def load_workflows(session: AsyncSession, dataset: Path, index: dict[str, Any], actor_id: int) -> dict[str, Any]:
+    """载入审查模板（审查模板.yaml，可选文件），返回 code -> 模板索引。"""
+    from iterd.plugins.workflows import services as workflow_services
+
+    path = dataset / "审查模板.yaml"
+    if not path.is_file():
+        return {}
+    templates = {t.code: t for t in await workflow_services.list_templates(session)}
+    for item in read_yaml(path).get("templates", []):
+        if item["code"] in templates:
+            continue
+        templates[item["code"]] = await workflow_services.create_template(
+            session,
+            actor_id=actor_id,
+            project_id=index["projects"][item["project_code"]].id if item.get("project_code") else None,
+            code=item["code"],
+            name=item["name"],
+            description=item.get("description", ""),
+            definition=item["definition"],
+            enabled=item.get("enabled", True),
+        )
+    await session.commit()
+    return templates
+
+
 async def load_dataset(session: AsyncSession, dataset: Path, *, actor_id: int) -> dict[str, Any]:
-    """载入单个数据集的数据部分（项目/迭代/产物/规则/规则集/模板），返回索引字典。"""
+    """载入单个数据集的数据部分（项目/迭代/产物/规则/规则集/模板/审查模板），返回索引字典。"""
     index = await load_structure(session, dataset, actor_id)
     versions = await load_artifacts(session, dataset, index, actor_id)
     rules = await load_rules(session, dataset, actor_id)
     sets = await load_rule_sets(session, dataset, index, rules, actor_id)
     templates = await load_sim_templates(session, dataset, index, actor_id)
-    return {"index": index, "versions": versions, "rules": rules, "sets": sets, "templates": templates}
+    workflows = await load_workflows(session, dataset, index, actor_id)
+    return {
+        "index": index,
+        "versions": versions,
+        "rules": rules,
+        "sets": sets,
+        "templates": templates,
+        "workflows": workflows,
+    }
 
 
 async def run_checks_sync(
@@ -403,6 +442,61 @@ async def run_sims_sync(
     return results
 
 
+async def run_workflows_sync(
+    session: AsyncSession, dataset: Path, loaded: dict[str, Any], *, actor_id: int
+) -> list[dict[str, Any]]:
+    """按数据集 runs 绑定同步执行审查流水线（seed 预置展示用，与 worker 同一执行路径）。
+
+    同步执行产生的调度 Task 在执行后删除，避免 serve 启动 worker 后重复执行
+    （workflow 重跑会新建 CheckRun/SimJob，与 check_run 幂等重跑不同）。
+    """
+    from iterd.plugins.workflows import services as workflow_services
+    from iterd.plugins.workflows.models import WorkflowRun
+    from iterd.tasks.models import Task
+
+    path = dataset / "审查模板.yaml"
+    if not path.is_file():
+        return []
+    index, templates = loaded["index"], loaded["workflows"]
+    results: list[dict[str, Any]] = []
+    for run in read_yaml(path).get("runs", []):
+        iteration = index["iterations"][(run["project_code"], int(run["iteration_number"]))]
+        workflow_run, task = await workflow_services.create_workflow_run(
+            session,
+            actor_id=actor_id,
+            iteration_id=iteration.id,
+            template_id=templates[run["workflow_code"]].id,
+        )
+        run_id = int(workflow_run.id)
+        task_id = int(task.id)
+        try:
+            summary = await workflow_services.execute_workflow_run(session, run_id=run_id)
+            results.append(
+                {
+                    "workflow_run_id": run_id,
+                    "workflow": run["workflow_code"],
+                    "status": "succeeded" if summary["conclusion"] == "success" else "failed",
+                    "summary": summary,
+                }
+            )
+        except Exception as exc:
+            await session.rollback()
+            failed = await session.get(WorkflowRun, run_id)
+            if failed is not None:
+                failed.status = "failed"
+                failed.finished_at = datetime.now(UTC)
+                await session.commit()
+            results.append(
+                {"workflow_run_id": run_id, "workflow": run["workflow_code"], "status": "failed", "summary": None}
+            )
+            print(f"审查运行 #{run_id} 执行失败: {exc}")
+        stale = await session.get(Task, task_id)
+        if stale is not None and stale.status == "pending":
+            await session.delete(stale)
+            await session.commit()
+    return results
+
+
 async def load_all_cases(session: AsyncSession, *, actor_id: int) -> list[dict[str, Any]]:
     """载入全部典型案例（数据 + 同步预执行检查与仿真），返回逐数据集摘要。
 
@@ -413,6 +507,7 @@ async def load_all_cases(session: AsyncSession, *, actor_id: int) -> list[dict[s
         loaded = await load_dataset(session, dataset, actor_id=actor_id)
         checks = await run_checks_sync(session, dataset, loaded, actor_id=actor_id)
         sims = await run_sims_sync(session, dataset, loaded, actor_id=actor_id)
+        workflows = await run_workflows_sync(session, dataset, loaded, actor_id=actor_id)
         results.append(
             {
                 "name": dataset.name,
@@ -421,6 +516,7 @@ async def load_all_cases(session: AsyncSession, *, actor_id: int) -> list[dict[s
                 "artifacts": len(loaded["versions"]),
                 "checks": checks,
                 "sims": sims,
+                "workflows": workflows,
             }
         )
     return results
