@@ -54,7 +54,31 @@ templates:
           with:
             template: COL-STABILITY-CHECK
             artifact: COL-301
+  - code: AXLE-REVIEW-PARALLEL
+    name: 传动系统审查（并行仿真）
+    project_code: AXLE-2026
+    description: 传动轴扭转校核与立柱稳定性校核无依赖并行执行，两级校核均满足阈值，流水线全绿（演示同层并行作业展示）
+    definition: |
+      name: 传动系统并行审查
+      description: 传动轴扭转校核与立柱稳定性校核并行执行
+
+      jobs:
+        shaft-sim:
+          name: 传动轴扭转校核（额定）
+          uses: simulation/run
+          with:
+            template: SHAFT-NOMINAL-CHECK
+            artifact: SHF-301
+        column-sim:
+          name: 立柱稳定性校核（标准段）
+          uses: simulation/run
+          with:
+            template: COL-STABILITY-CHECK
+            artifact: COL-301
 runs:
   - project_code: AXLE-2026
     iteration_number: 2
     workflow_code: AXLE-REVIEW
+  - project_code: AXLE-2026
+    iteration_number: 2
+    workflow_code: AXLE-REVIEW-PARALLEL

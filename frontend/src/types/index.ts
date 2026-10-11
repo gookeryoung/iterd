@@ -344,6 +344,16 @@ export interface SimTemplateInput {
   enabled?: boolean;
 }
 
+/** 仿真模板更新入参（部分更新）。 */
+export interface SimTemplateUpdateInput {
+  name?: string;
+  solver_type?: string;
+  params?: Record<string, unknown> | null;
+  thresholds?: Record<string, unknown> | null;
+  description?: string;
+  enabled?: boolean;
+}
+
 /** 仿真作业汇总（后端聚合结构）。 */
 export interface SimSummary {
   metrics: number;

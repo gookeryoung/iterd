@@ -222,3 +222,67 @@ def test_sim_job_edges(client: TestClient) -> None:
     login_as(client, "designer", "designer123")
     denied = client.post(f"/api/v1/iterations/{iteration_id}/sim-jobs", json={"template_id": template["id"]})
     assert denied.status_code == 403
+
+
+def test_template_patch(client: TestClient) -> None:
+    """仿真模板 PATCH：部分更新 / 求解器校验 / RBAC / 停用门禁 / 404。"""
+    project = client.post("/api/v1/projects", json={"code": "PTP", "name": "PATCH 项目"}).json()
+    template = client.post(
+        "/api/v1/sim-templates",
+        json={
+            "code": "PTP-BEAM",
+            "name": "梁校核",
+            "solver_type": "beam_static",
+            "project_id": project["id"],
+            "thresholds": {"max_stress": {"max": 100}},
+            "description": "原始说明",
+        },
+    ).json()
+    template_id = template["id"]
+
+    # 部分更新：仅改名称与阈值，其余字段不变
+    patched = client.patch(f"/api/v1/sim-templates/{template_id}", json={"name": "梁校核 v2", "enabled": False})
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["name"] == "梁校核 v2"
+    assert body["enabled"] is False
+    assert body["solver_type"] == "beam_static"
+    assert body["thresholds"] == {"max_stress": {"max": 100}}
+    assert body["description"] == "原始说明"
+
+    # solver_type 变更：未知求解器 422，合法求解器生效
+    unknown = client.patch(f"/api/v1/sim-templates/{template_id}", json={"solver_type": "no_such_solver"})
+    assert unknown.status_code == 422
+    switched = client.patch(
+        f"/api/v1/sim-templates/{template_id}",
+        json={"solver_type": "shaft_torsion", "params": {"torque": 300}, "thresholds": None},
+    )
+    assert switched.status_code == 200
+    assert switched.json()["solver_type"] == "shaft_torsion"
+    assert switched.json()["params"] == {"torque": 300}
+    assert switched.json()["thresholds"] is None
+
+    # 停用模板不可发起作业
+    iteration = client.post(f"/api/v1/projects/{project['id']}/iterations", json={"title": "迭代"}).json()
+    disabled = client.post(f"/api/v1/iterations/{iteration['id']}/sim-jobs", json={"template_id": template_id})
+    assert disabled.status_code == 400
+    assert "ITERD-INVALID_STATE" in disabled.text
+
+    # 空体 PATCH：无字段变更仍成功
+    noop = client.patch(f"/api/v1/sim-templates/{template_id}", json={})
+    assert noop.status_code == 200
+
+    assert client.patch("/api/v1/sim-templates/99999", json={"name": "x"}).status_code == 404
+
+    # RBAC：非成员 designer 不能改项目模板，也不能改全局模板
+    client.post("/api/v1/sim-templates", json={"code": "PTP-GLOBAL", "name": "全局", "solver_type": "beam_static"})
+    login_as(client, "designer", "designer123")
+    assert client.patch(f"/api/v1/sim-templates/{template_id}", json={"name": "越权"}).status_code == 403
+    templates = client.get("/api/v1/sim-templates").json()
+    global_id = next(t["id"] for t in templates if t["code"] == "PTP-GLOBAL")
+    assert client.patch(f"/api/v1/sim-templates/{global_id}", json={"name": "越权"}).status_code == 403
+
+    # 审计已记录 sim_template.update
+    audits = client.get("/api/v1/audit-logs", params={"resource_type": "sim_template"}).json()
+    actions = [a["action"] for a in audits]
+    assert "sim_template.update" in actions

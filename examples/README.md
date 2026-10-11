@@ -117,6 +117,19 @@ examples/
 | `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
 | `预期检查结果.json` | 自检基线：检查汇总、发现项与四种仿真结论的期望值 |
 
+### 审查流水线示例（审查模板.yaml）
+
+数据集内 `审查模板.yaml` 提供三类典型流水线（`--with-workflow` 时按 `runs` 预执行）：
+
+| 模板编码 | 拓扑 | 演示语义 |
+| --- | --- | --- |
+| `AXLE-REVIEW` | 串行两级仿真（shaft-sim → needs → column-sim） | 全绿链路：作业依序执行，运行结论 `success` |
+| `AXLE-REVIEW-PARALLEL` | 并行双仿真（shaft-sim 与 column-sim 同层无依赖） | 并行层展示：两作业同层并列，均通过后汇总 `success` |
+| `AXLE-REVIEW-GATED` | 规则门禁 + 下游仿真（默认停用） | 门禁语义：当前迭代存在 error 级发现项，规则检查判 `failure`，下游两级仿真 `skipped` |
+
+运行视图（前端「审查流水线」Tab）支持 GitHub Actions 风格展示：作业树按 needs 层级缩进、
+运行中实时进度与日志流（WebSocket 推送）、作业详情含发现项标注与仿真指标判定表。
+
 ### 产物实体文件（上传用）
 
 | 文件 | 类别 | 说明 |
@@ -203,6 +216,9 @@ uv run python scripts/load_example.py --dataset examples/datasets/项目-边界�
 
 # 载入传动轴与立柱设计数据集（新检查器/求解器完整链路）
 uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机传动轴与立柱设计 --with-check --with-sim
+
+# 载入传动轴数据集并预执行审查流水线（串行全绿 AXLE-REVIEW + 并行双仿真 AXLE-REVIEW-PARALLEL）
+uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机传动轴与立柱设计 --with-check --with-sim --with-workflow
 
 # 载入编码与参数边界数据集（含停用规则与非法参数仿真边界）
 uv run python scripts/load_example.py --dataset examples/datasets/项目-编码与参数边界数据 --with-check --with-sim

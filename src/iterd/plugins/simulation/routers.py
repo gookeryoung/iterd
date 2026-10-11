@@ -68,6 +68,26 @@ async def get_template(template_id: int, user: CurrentUser, session: SessionDep)
     return schemas.SimTemplateOut.model_validate(template)
 
 
+@router.patch("/sim-templates/{template_id}", response_model=schemas.SimTemplateOut)
+async def update_template(
+    template_id: int, body: schemas.SimTemplateUpdateIn, user: CurrentUser, session: SessionDep
+) -> schemas.SimTemplateOut:
+    """更新仿真模板（部分更新；项目级 designer+，全局超管）。"""
+    template = await services.get_template(session, template_id)
+    if template.project_id is None:
+        if not user.is_superuser:
+            raise permission_denied("全局仿真模板仅超级管理员可维护")
+    else:
+        await rbac.require_project_role(
+            session, template.project_id, user.id, "designer", is_superuser=user.is_superuser
+        )
+    updated = await services.update_template(
+        session, actor_id=user.id, template=template, fields=body.model_dump(exclude_unset=True)
+    )
+    await session.commit()
+    return schemas.SimTemplateOut.model_validate(updated)
+
+
 # ---- 仿真作业 ----
 
 

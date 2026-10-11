@@ -13,11 +13,12 @@ import {
   Select,
   Space,
   Spin,
+  Switch,
   Table,
   Tag,
   Typography,
 } from 'antd';
-import { CaretRightOutlined, PlusOutlined } from '@ant-design/icons';
+import { CaretRightOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App as AntApp } from 'antd';
@@ -28,6 +29,7 @@ import {
   fetchSimResult,
   fetchSimTemplates,
   fetchSolvers,
+  updateSimTemplate,
 } from '../api/simulation';
 import { fetchArtifacts } from '../api/artifacts';
 import { extractErrorMessage } from '../api/client';
@@ -39,6 +41,7 @@ import {
   type SimResult,
   type SimResultDetail,
   type SimTemplate,
+  type SimTemplateUpdateInput,
   type SolverInfo,
 } from '../types';
 import { formatDateTime } from '../utils/format';
@@ -57,13 +60,14 @@ interface SimTabProps {
   projectId: number;
 }
 
-/** 新建模板表单值。 */
+/** 模板表单值（新建/编辑共用）。 */
 interface TemplateFormValues {
   code: string;
   name: string;
   solver_type: string;
   thresholds: string;
   description: string;
+  enabled?: boolean;
 }
 
 export default function SimTab({ iterationId, projectId }: SimTabProps) {
@@ -73,6 +77,7 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
   const [versionId, setVersionId] = useState<number | undefined>(undefined);
   const [resultJob, setResultJob] = useState<SimJob | null>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<SimTemplate | null>(null);
   const [form] = Form.useForm<TemplateFormValues>();
 
   const templatesQuery = useQuery({
@@ -132,7 +137,26 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
     },
   });
 
-  const createTemplateMutation = useMutation({
+  // 打开编辑时回填表单（新建时重置为默认值）
+  useEffect(() => {
+    if (!templateModalOpen) {
+      return;
+    }
+    if (editingTemplate) {
+      form.setFieldsValue({
+        code: editingTemplate.code,
+        name: editingTemplate.name,
+        solver_type: editingTemplate.solver_type,
+        thresholds: editingTemplate.thresholds ? JSON.stringify(editingTemplate.thresholds) : '',
+        description: editingTemplate.description,
+        enabled: editingTemplate.enabled,
+      });
+    } else {
+      form.setFieldsValue({ code: '', name: '', thresholds: '', description: '', enabled: true });
+    }
+  }, [templateModalOpen, editingTemplate, form]);
+
+  const saveTemplateMutation = useMutation({
     mutationFn: (values: TemplateFormValues) => {
       const raw = values.thresholds?.trim();
       let thresholds: Record<string, unknown> | null = null;
@@ -142,6 +166,16 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
         } catch {
           throw new Error('验收阈值必须是合法 JSON，例如 {"max_stress":{"max":100}}');
         }
+      }
+      if (editingTemplate) {
+        const patch: SimTemplateUpdateInput = {
+          name: values.name,
+          solver_type: values.solver_type,
+          thresholds,
+          description: values.description,
+          enabled: values.enabled ?? true,
+        };
+        return updateSimTemplate(editingTemplate.id, patch);
       }
       return createSimTemplate({
         code: values.code,
@@ -153,8 +187,9 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
       });
     },
     onSuccess: (template: SimTemplate) => {
-      message.success(`模板 ${template.code} 已创建`);
+      message.success(editingTemplate ? `模板 ${template.code} 已更新` : `模板 ${template.code} 已创建`);
       setTemplateModalOpen(false);
+      setEditingTemplate(null);
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['sim-templates', projectId] });
     },
@@ -172,6 +207,15 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
   };
 
   const selectedTemplate = (templatesQuery.data ?? []).find((t) => t.id === templateId);
+
+  const openEditModal = () => {
+    if (!selectedTemplate) {
+      message.warning('请先选择仿真模板');
+      return;
+    }
+    setEditingTemplate(selectedTemplate);
+    setTemplateModalOpen(true);
+  };
   const solverInfo: SolverInfo | undefined = (solversQuery.data ?? []).find(
     (s) => s.solver_type === selectedTemplate?.solver_type,
   );
@@ -313,8 +357,11 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
         >
           发起仿真
         </Button>
-        <Button icon={<PlusOutlined />} onClick={() => setTemplateModalOpen(true)}>
+        <Button icon={<PlusOutlined />} onClick={() => { setEditingTemplate(null); setTemplateModalOpen(true); }}>
           新建模板
+        </Button>
+        <Button icon={<EditOutlined />} disabled={!selectedTemplate} onClick={openEditModal}>
+          编辑模板
         </Button>
       </Space>
 
@@ -417,23 +464,23 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
         )}
       </Drawer>
 
-      {/* 新建模板 Modal */}
+      {/* 新建/编辑模板 Modal */}
       <Modal
-        title="新建仿真模板"
+        title={editingTemplate ? `编辑仿真模板（${editingTemplate.code}）` : '新建仿真模板'}
         open={templateModalOpen}
-        onCancel={() => setTemplateModalOpen(false)}
+        onCancel={() => { setTemplateModalOpen(false); setEditingTemplate(null); }}
         onOk={() => form.submit()}
-        confirmLoading={createTemplateMutation.isPending}
+        confirmLoading={saveTemplateMutation.isPending}
         destroyOnHidden
       >
         <Form<TemplateFormValues>
           form={form}
           layout="vertical"
-          onFinish={(values) => createTemplateMutation.mutate(values)}
-          initialValues={{ solver_type: 'beam_static', thresholds: '', description: '' }}
+          onFinish={(values) => saveTemplateMutation.mutate(values)}
+          initialValues={{ solver_type: 'beam_static', thresholds: '', description: '', enabled: true }}
         >
           <Form.Item name="code" label="模板编码" rules={[{ required: true, message: '请输入模板编码' }]}>
-            <Input placeholder="BEAM-CHECK" />
+            <Input placeholder="BEAM-CHECK" disabled={editingTemplate !== null} />
           </Form.Item>
           <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
             <Input placeholder="梁强度校核" />
@@ -447,12 +494,15 @@ export default function SimTab({ iterationId, projectId }: SimTabProps) {
           <Form.Item
             name="thresholds"
             label="验收阈值（JSON，min/max）"
-            extra={'示例：{"max_stress":{"max":100},"safety_factor":{"min":1.5}}'}
+            extra={'示例：{"max_stress":{"max":100},"safety_factor":{"min":1.5}}；留空表示仅记录不判定'}
           >
             <Input.TextArea rows={3} placeholder='{"max_stress":{"max":100}}' />
           </Form.Item>
           <Form.Item name="description" label="说明">
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="enabled" label="启用" valuePropName="checked">
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>

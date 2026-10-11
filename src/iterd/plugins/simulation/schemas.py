@@ -21,6 +21,17 @@ class SimTemplateIn(BaseModel):
     enabled: bool = True
 
 
+class SimTemplateUpdateIn(BaseModel):
+    """更新仿真模板入参（部分更新，solver_type 变更时重新校验求解器已注册）."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    solver_type: str | None = Field(default=None, min_length=1, max_length=64)
+    params: dict[str, Any] | None = None
+    thresholds: dict[str, Any] | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
 class SimTemplateOut(BaseModel):
     """仿真模板对外结构."""
 

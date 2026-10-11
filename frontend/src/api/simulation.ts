@@ -7,6 +7,7 @@ import type {
   SimResult,
   SimTemplate,
   SimTemplateInput,
+  SimTemplateUpdateInput,
   SolverInfo,
 } from '../types';
 
@@ -37,6 +38,15 @@ export async function createSimTemplate(
   data: SimTemplateInput,
 ): Promise<SimTemplate> {
   const resp = await api.post<SimTemplate>('/sim-templates', data);
+  return resp.data;
+}
+
+/** 更新仿真模板（部分更新，后端 200）。 */
+export async function updateSimTemplate(
+  id: number,
+  data: SimTemplateUpdateInput,
+): Promise<SimTemplate> {
+  const resp = await api.patch<SimTemplate>(`/sim-templates/${id}`, data);
   return resp.data;
 }
 

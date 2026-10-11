@@ -1,7 +1,7 @@
 /** 审查运行视图：summary 条 + 作业树（needs 层级缩进）+ 作业详情双栏（GitHub Actions run 页复刻）。 */
 
-import { useEffect, useMemo, useState } from 'react';
-import { Button, Space, Spin, Tooltip, Typography } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Progress, Space, Spin, Tooltip, Typography } from 'antd';
 import { CodeOutlined, RedoOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { rerunWorkflowRun } from '../../api/workflows';
@@ -56,7 +56,17 @@ export default function WorkflowRunView({ run, canRun = true }: WorkflowRunViewP
   const [showYaml, setShowYaml] = useState(false);
 
   const busy = run.status === 'pending' || run.status === 'running';
-  useTaskStream(busy ? run.task_id : null);
+  const { state: streamState, connected } = useTaskStream(busy ? run.task_id : null);
+  const streamLogs = streamState?.logs ?? [];
+  const logBoxRef = useRef<HTMLDivElement | null>(null);
+
+  // 实时日志流：新条目到达时滚动到底部
+  useEffect(() => {
+    const box = logBoxRef.current;
+    if (box) {
+      box.scrollTop = box.scrollHeight;
+    }
+  }, [streamLogs.length]);
 
   const byKey = useMemo(() => new Map(run.jobs.map((j) => [j.job_key, j])), [run.jobs]);
   const jobsWithDepth = useMemo(
@@ -142,6 +152,71 @@ export default function WorkflowRunView({ run, canRun = true }: WorkflowRunViewP
           )}
         </span>
       </div>
+
+      {/* 运行中：实时进度 + 日志流（WebSocket 推送，GitHub Actions live log 风格） */}
+      {busy && (
+        <div
+          style={{
+            border: `1px solid ${PRIMER_COLORS.border}`,
+            borderRadius: 6,
+            background: '#fff',
+            padding: '10px 16px',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spin size="small" />
+            <span style={{ fontSize: 12.5, color: PRIMER_COLORS.text }}>
+              {streamState?.progress?.stage || '排队等待调度'}
+              {streamState?.progress?.percent !== undefined &&
+                streamState?.progress?.percent !== null &&
+                ` · ${streamState.progress.percent}%`}
+            </span>
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: 12,
+                color: connected ? PRIMER_COLORS.success : PRIMER_COLORS.muted,
+              }}
+            >
+              {connected ? '实时日志已连接' : '实时日志未连接'}
+            </span>
+          </div>
+          {streamState?.progress && (
+            <Progress percent={streamState.progress.percent} size="small" status="active" showInfo={false} />
+          )}
+          <div
+            ref={logBoxRef}
+            style={{
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+              fontSize: 12,
+              lineHeight: '19px',
+              maxHeight: 180,
+              overflow: 'auto',
+              marginTop: 8,
+              borderTop: streamLogs.length > 0 ? `1px solid ${PRIMER_COLORS.border}` : undefined,
+              paddingTop: streamLogs.length > 0 ? 6 : 0,
+            }}
+          >
+            {streamLogs.length === 0 ? (
+              <div style={{ color: PRIMER_COLORS.muted }}>等待日志输出…</div>
+            ) : (
+              streamLogs.map((entry, i) => (
+                <div
+                  key={i}
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    color: entry.level === 'error' ? PRIMER_COLORS.danger : PRIMER_COLORS.text,
+                    background: entry.level === 'error' ? PRIMER_COLORS.dangerBg : undefined,
+                  }}
+                >
+                  {entry.message}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* YAML 快照折叠区 */}
       {showYaml && (

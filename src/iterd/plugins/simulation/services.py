@@ -62,6 +62,26 @@ async def create_template(session: AsyncSession, *, actor_id: int, **fields: obj
     return template
 
 
+async def update_template(
+    session: AsyncSession, *, actor_id: int, template: SimTemplate, fields: dict[str, object]
+) -> SimTemplate:
+    """更新仿真模板（solver_type 变更时重新校验求解器已注册），记录审计."""
+    if "solver_type" in fields:
+        get_solver(str(fields["solver_type"]))  # 求解器未注册时提前 422
+    for key, value in fields.items():
+        setattr(template, key, value)
+    await audit(
+        session,
+        actor_id=actor_id,
+        actor_name="",
+        action="sim_template.update",
+        resource_type="sim_template",
+        resource_id=template.id,
+        after=dict(fields),
+    )
+    return template
+
+
 # ---- 仿真作业 ----
 
 
