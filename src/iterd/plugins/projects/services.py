@@ -92,6 +92,16 @@ async def list_members(session: AsyncSession, project_id: int) -> list[ProjectMe
     )
 
 
+async def get_user_names(session: AsyncSession, user_ids: list[int]) -> dict[int, str]:
+    """批量取用户名（成员列表展示用，非管理员也能看到用户名）。"""
+    if not user_ids:
+        return {}
+    from iterd.plugins.accounts.models import User
+
+    rows = (await session.execute(select(User.id, User.username).where(User.id.in_(set(user_ids))))).all()
+    return {int(row[0]): str(row[1]) for row in rows}
+
+
 async def upsert_member(
     session: AsyncSession, *, actor_id: int, project_id: int, user_id: int, role: str
 ) -> ProjectMember:

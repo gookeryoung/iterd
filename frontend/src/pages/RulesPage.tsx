@@ -5,19 +5,33 @@ import {
   Button,
   Card,
   Divider,
+  Drawer,
   Form,
   Input,
+  List,
   Modal,
   Select,
+  Space,
+  Switch,
   Table,
-  Tag,
   Typography,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App as AntApp } from 'antd';
-import { createRule, createRuleSet, fetchRules, fetchRuleSets, RULE_CATEGORY_OPTIONS, SEVERITY_OPTIONS } from '../api/rules';
+import {
+  addRulesToSet,
+  createRule,
+  createRuleSet,
+  fetchCheckers,
+  fetchRules,
+  fetchRuleSet,
+  fetchRuleSets,
+  RULE_CATEGORY_OPTIONS,
+  SEVERITY_OPTIONS,
+  updateRule,
+} from '../api/rules';
 import { extractErrorMessage } from '../api/client';
 import {
   RULE_CATEGORY_LABELS,
@@ -40,6 +54,7 @@ interface RuleFormValues {
   params?: string;
   severity_default: Severity;
   description?: string;
+  enabled?: boolean;
 }
 
 /** 新建规则集表单值。 */
@@ -54,6 +69,8 @@ export default function RulesPage() {
   const { message } = AntApp.useApp();
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [ruleSetModalOpen, setRuleSetModalOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<RuleItem | null>(null);
+  const [detailRuleSetId, setDetailRuleSetId] = useState<number | null>(null);
   const [ruleForm] = Form.useForm<RuleFormValues>();
   const [ruleSetForm] = Form.useForm<RuleSetFormValues>();
 
@@ -65,6 +82,18 @@ export default function RulesPage() {
   const ruleSetsQuery = useQuery({
     queryKey: ['rule-sets', undefined],
     queryFn: () => fetchRuleSets(),
+  });
+
+  const checkersQuery = useQuery({
+    queryKey: ['checkers'],
+    queryFn: fetchCheckers,
+    staleTime: 300000,
+  });
+
+  const ruleSetDetailQuery = useQuery({
+    queryKey: ['rule-set', detailRuleSetId],
+    queryFn: () => fetchRuleSet(detailRuleSetId as number),
+    enabled: detailRuleSetId !== null,
   });
 
   /** 校验参数为合法 JSON。 */
@@ -87,6 +116,50 @@ export default function RulesPage() {
       setRuleModalOpen(false);
       ruleForm.resetFields();
       void queryClient.invalidateQueries({ queryKey: ['rules'] });
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const updateRuleMutation = useMutation({
+    mutationFn: ({ id, input }: { id: number; input: Partial<RuleInput> }) => updateRule(id, input),
+    onSuccess: () => {
+      message.success('规则已更新');
+      setRuleModalOpen(false);
+      setEditingRule(null);
+      void queryClient.invalidateQueries({ queryKey: ['rules'] });
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const toggleRuleMutation = useMutation({
+    mutationFn: ({ rule, enabled }: { rule: RuleItem; enabled: boolean }) =>
+      updateRule(rule.id, {
+        code: rule.code,
+        name: rule.name,
+        category: rule.category,
+        checker_type: rule.checker_type,
+        params: rule.params,
+        severity_default: rule.severity_default,
+        enabled,
+      }),
+    onSuccess: (_data, variables) => {
+      message.success(variables.enabled ? '规则已启用' : '规则已停用');
+      void queryClient.invalidateQueries({ queryKey: ['rules'] });
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const addRulesMutation = useMutation({
+    mutationFn: ({ id, ruleIds }: { id: number; ruleIds: number[] }) => addRulesToSet(id, ruleIds),
+    onSuccess: () => {
+      message.success('规则已加入规则集');
+      void queryClient.invalidateQueries({ queryKey: ['rule-set', detailRuleSetId] });
     },
     onError: (error: unknown) => {
       message.error(extractErrorMessage(error));
@@ -129,15 +202,32 @@ export default function RulesPage() {
       title: '启用',
       dataIndex: 'enabled',
       key: 'enabled',
-      width: 90,
-      render: (enabled: boolean) => (enabled ? <Tag color="green">是</Tag> : <Tag>否</Tag>),
+      width: 110,
+      render: (enabled: boolean, record: RuleItem) => (
+        <Switch
+          size="small"
+          checked={enabled}
+          loading={toggleRuleMutation.isPending && toggleRuleMutation.variables?.rule.id === record.id}
+          onChange={(checked) => toggleRuleMutation.mutate({ rule: record, enabled: checked })}
+        />
+      ),
     },
     {
       title: '更新时间',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 170,
+      width: 150,
       render: (value: string) => formatDateTime(value),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 90,
+      render: (_: unknown, record: RuleItem) => (
+        <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openRuleModal(record)}>
+          编辑
+        </Button>
+      ),
     },
   ];
 
@@ -155,8 +245,18 @@ export default function RulesPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 170,
+      width: 150,
       render: (value: string) => formatDateTime(value),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 120,
+      render: (_: unknown, record: RuleSet) => (
+        <Button type="link" size="small" onClick={() => setDetailRuleSetId(record.id)}>
+          成员规则
+        </Button>
+      ),
     },
   ];
 
@@ -170,7 +270,7 @@ export default function RulesPage() {
         return;
       }
     }
-    createRuleMutation.mutate({
+    const input: RuleInput = {
       code: values.code.trim(),
       name: values.name.trim(),
       category: values.category,
@@ -178,8 +278,37 @@ export default function RulesPage() {
       params,
       severity_default: values.severity_default,
       description: values.description?.trim() ?? '',
-    });
+      enabled: values.enabled ?? true,
+    };
+    if (editingRule) {
+      updateRuleMutation.mutate({ id: editingRule.id, input });
+      return;
+    }
+    createRuleMutation.mutate(input);
   };
+
+  /** 打开新建/编辑规则 Modal。 */
+  const openRuleModal = (rule: RuleItem | null) => {
+    setEditingRule(rule);
+    setRuleModalOpen(true);
+    if (rule) {
+      ruleForm.setFieldsValue({
+        code: rule.code,
+        name: rule.name,
+        category: rule.category,
+        checker_type: rule.checker_type,
+        params: rule.params ? JSON.stringify(rule.params) : '',
+        severity_default: rule.severity_default,
+        description: rule.description,
+        enabled: rule.enabled,
+      });
+    } else {
+      ruleForm.resetFields();
+      ruleForm.setFieldsValue({ severity_default: 'warning', enabled: true });
+    }
+  };
+
+  const ruleNameMap = new Map((rulesQuery.data ?? []).map((rule) => [rule.id, `${rule.code} ${rule.name}`]));
 
   return (
     <div>
@@ -193,10 +322,7 @@ export default function RulesPage() {
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            onClick={() => {
-              ruleForm.resetFields();
-              setRuleModalOpen(true);
-            }}
+            onClick={() => openRuleModal(null)}
           >
             新建规则
           </Button>
@@ -240,13 +366,16 @@ export default function RulesPage() {
         />
       </Card>
 
-      {/* 新建规则 Modal */}
+      {/* 新建/编辑规则 Modal */}
       <Modal
-        title="新建规则"
+        title={editingRule ? `编辑规则 - ${editingRule.code}` : '新建规则'}
         open={ruleModalOpen}
-        confirmLoading={createRuleMutation.isPending}
+        confirmLoading={createRuleMutation.isPending || updateRuleMutation.isPending}
         onOk={() => ruleForm.submit()}
-        onCancel={() => setRuleModalOpen(false)}
+        onCancel={() => {
+          setRuleModalOpen(false);
+          setEditingRule(null);
+        }}
         destroyOnClose
       >
         <Form<RuleFormValues> form={ruleForm} layout="vertical" onFinish={handleRuleSubmit}>
@@ -262,9 +391,21 @@ export default function RulesPage() {
           <Form.Item
             name="checker_type"
             label="检查器类型"
-            rules={[{ required: true, message: '请输入检查器类型' }]}
+            rules={[{ required: true, message: '请选择检查器类型' }]}
+            extra={
+              checkersQuery.data
+                ? `已注册：${checkersQuery.data.map((item) => item.checker_type).join('、')}`
+                : undefined
+            }
           >
-            <Input placeholder="如 missing_dimension" />
+            <Select<string>
+              placeholder="选择已注册检查器"
+              loading={checkersQuery.isPending}
+              options={(checkersQuery.data ?? []).map((item) => ({
+                value: item.checker_type,
+                label: item.description ? `${item.checker_type}（${item.description}）` : item.checker_type,
+              }))}
+            />
           </Form.Item>
           <Form.Item
             name="params"
@@ -278,6 +419,9 @@ export default function RulesPage() {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="规则描述（可选）" />
+          </Form.Item>
+          <Form.Item name="enabled" label="启用" valuePropName="checked">
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>
@@ -322,6 +466,44 @@ export default function RulesPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 规则集成员抽屉 */}
+      <Drawer
+        title={`规则集成员${ruleSetDetailQuery.data ? ` - ${ruleSetDetailQuery.data.name}` : ''}`}
+        width={520}
+        open={detailRuleSetId !== null}
+        onClose={() => setDetailRuleSetId(null)}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Select<number[]>
+            style={{ width: '100%' }}
+            mode="multiple"
+            placeholder="选择要加入的规则"
+            loading={rulesQuery.isPending}
+            options={(rulesQuery.data ?? []).map((rule) => ({
+              value: rule.id,
+              label: `${rule.code} ${rule.name}`,
+            }))}
+            onChange={(ids) => {
+              if (detailRuleSetId !== null && ids.length > 0) {
+                addRulesMutation.mutate({ id: detailRuleSetId, ruleIds: ids });
+              }
+            }}
+            value={[]}
+          />
+          <List
+            size="small"
+            bordered
+            dataSource={ruleSetDetailQuery.data?.rule_ids ?? []}
+            locale={{ emptyText: '该规则集暂无成员规则' }}
+            renderItem={(ruleId) => (
+              <List.Item>
+                <Typography.Text>{ruleNameMap.get(ruleId) ?? `规则 #${ruleId}`}</Typography.Text>
+              </List.Item>
+            )}
+          />
+        </Space>
+      </Drawer>
     </div>
   );
 }

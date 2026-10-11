@@ -1,6 +1,6 @@
-/** 迭代详情 - 规则检查 Tab：发起检查 / 轮询进度 / 运行列表 / 发现项 Drawer。 */
+/** 迭代详情 - 规则检查 Tab：绑定规则集 / 发起检查 / WS 进度 / 运行列表 / 发现项报告。 */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -13,19 +13,22 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { CaretRightOutlined } from '@ant-design/icons';
+import { CaretRightOutlined, LinkOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App as AntApp } from 'antd';
 import {
+  bindRuleSet,
   createCheckRun,
   fetchCheckRun,
   fetchCheckRuns,
   fetchFindings,
+  fetchRuleSetBinding,
   fetchRuleSets,
   SEVERITY_OPTIONS,
 } from '../api/rules';
 import { extractErrorMessage } from '../api/client';
+import { useTaskStream } from '../hooks/useTaskStream';
 import {
   SEVERITY_LABELS,
   type CheckRun,
@@ -70,6 +73,11 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
     queryFn: () => fetchRuleSets(projectId),
   });
 
+  const bindingQuery = useQuery({
+    queryKey: ['rule-set-binding', iterationId],
+    queryFn: () => fetchRuleSetBinding(iterationId),
+  });
+
   const checkRunsQuery = useQuery({
     queryKey: ['check-runs', iterationId],
     queryFn: () => fetchCheckRuns(iterationId),
@@ -88,7 +96,7 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
     queryKey: ['check-run', latestRunId],
     queryFn: () => fetchCheckRun(latestRunId as number),
     enabled: latestRunId !== null,
-    // 未终态时每 1.5 秒轮询详情
+    // 未终态时每 1.5 秒轮询详情（WS 可用时以 WS 推送为主）
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === 'succeeded' || status === 'failed' ? false : 1500;
@@ -101,12 +109,34 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
     enabled: findingsRun !== null && findingsRun.status === 'succeeded',
   });
 
+  // 未绑定规则集时默认选中已绑定项
+  useEffect(() => {
+    if (ruleSetId === undefined && bindingQuery.data?.rule_set_id) {
+      setRuleSetId(bindingQuery.data.rule_set_id);
+    }
+  }, [bindingQuery.data, ruleSetId]);
+
+  const latestRun = latestRunQuery.data;
+  const busy = latestRun !== undefined && (latestRun.status === 'pending' || latestRun.status === 'running');
+  const { state: streamState, connected } = useTaskStream(busy ? (latestRun?.task_id ?? null) : null);
+
   const startMutation = useMutation({
     mutationFn: (id: number) => createCheckRun(iterationId, id),
     onSuccess: (run) => {
       message.success(`检查已发起（运行 #${run.id}）`);
       void queryClient.invalidateQueries({ queryKey: ['check-runs', iterationId] });
       void queryClient.invalidateQueries({ queryKey: ['check-run', run.id] });
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const bindMutation = useMutation({
+    mutationFn: (id: number) => bindRuleSet(id, iterationId),
+    onSuccess: () => {
+      message.success('规则集已绑定到当前迭代');
+      void queryClient.invalidateQueries({ queryKey: ['rule-set-binding', iterationId] });
     },
     onError: (error: unknown) => {
       message.error(extractErrorMessage(error));
@@ -122,6 +152,7 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
   };
 
   const ruleSetNameMap = new Map((ruleSetsQuery.data ?? []).map((rs) => [rs.id, rs.name]));
+  const boundRuleSetId = bindingQuery.data?.rule_set_id ?? null;
 
   const runColumns: ColumnsType<CheckRun> = [
     { title: '运行 ID', dataIndex: 'id', key: 'id', width: 90 },
@@ -194,16 +225,30 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
       title: '严重级别',
       dataIndex: 'severity',
       key: 'severity',
-      width: 110,
+      width: 100,
       render: (severity: Severity) => <SeverityTag severity={severity} />,
     },
-    { title: '位置', dataIndex: 'location', key: 'location', width: 220, ellipsis: true },
+    {
+      title: '规则',
+      key: 'rule',
+      width: 180,
+      render: (_: unknown, record: Finding) => (
+        <span>
+          <Typography.Text code>{record.rule_code}</Typography.Text> {record.rule_name}
+        </span>
+      ),
+    },
+    {
+      title: '产物',
+      key: 'artifact',
+      width: 200,
+      render: (_: unknown, record: Finding) => `${record.artifact_code} ${record.artifact_name}（v${record.version_no}）`,
+    },
+    { title: '位置', dataIndex: 'location', key: 'location', width: 200, ellipsis: true },
     { title: '消息', dataIndex: 'message', key: 'message', ellipsis: true },
   ];
 
-  const latestRun = latestRunQuery.data;
-  const latestBusy =
-    latestRun !== undefined && (latestRun.status === 'pending' || latestRun.status === 'running');
+  const streamPercent = streamState?.progress?.percent ?? null;
 
   return (
     <div>
@@ -227,6 +272,19 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
         >
           发起检查
         </Button>
+        <Button
+          icon={<LinkOutlined />}
+          disabled={!ruleSetId || ruleSetId === boundRuleSetId}
+          loading={bindMutation.isPending}
+          onClick={() => ruleSetId && bindMutation.mutate(ruleSetId)}
+        >
+          绑定到本迭代
+        </Button>
+        {boundRuleSetId && (
+          <Typography.Text type="secondary">
+            已绑定：{ruleSetNameMap.get(boundRuleSetId) ?? `规则集 #${boundRuleSetId}`}
+          </Typography.Text>
+        )}
       </Space>
 
       {/* 最新一次运行的进度 / 汇总 */}
@@ -235,11 +293,30 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
           <Spin />
         </div>
       )}
-      {latestRun && latestBusy && (
+      {latestRun && busy && (
         <div style={{ padding: '16px 0' }}>
-          <Spin style={{ marginRight: 12 }} />
-          <Typography.Text>检查执行中（运行 #{latestRun.id}）</Typography.Text>
-          <Progress percent={60} status="active" showInfo={false} style={{ marginTop: 8 }} />
+          <Space>
+            <Spin size="small" />
+            <Typography.Text>
+              检查执行中（运行 #{latestRun.id}
+              {connected ? '，实时推送已连接' : ''}）
+            </Typography.Text>
+          </Space>
+          {streamPercent !== null ? (
+            <Progress
+              percent={streamPercent}
+              status="active"
+              style={{ marginTop: 8 }}
+              format={() => streamState?.progress?.stage ?? ''}
+            />
+          ) : (
+            <Progress percent={60} status="active" showInfo={false} style={{ marginTop: 8 }} />
+          )}
+          {streamState?.logs && streamState.logs.length > 0 && (
+            <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
+              最新日志：{streamState.logs[streamState.logs.length - 1].message}
+            </Typography.Paragraph>
+          )}
         </div>
       )}
       {latestRun && latestRun.status === 'succeeded' && latestRun.summary && (
@@ -265,7 +342,7 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
           showIcon
           style={{ marginBottom: 16 }}
           message={`运行 #${latestRun.id} 检查失败`}
-          description="请查看任务日志或稍后重试。"
+          description={latestRun.task_id ? '请查看任务详情或稍后重试（最多重试 3 次）。' : '请稍后重试。'}
         />
       )}
 
@@ -287,7 +364,7 @@ export default function CheckTab({ iterationId, projectId }: CheckTabProps) {
             {findingsRun && <Typography.Text type="secondary">运行 #{findingsRun.id}</Typography.Text>}
           </Space>
         }
-        width={800}
+        width={900}
         open={findingsRun !== null}
         onClose={() => {
           setFindingsRun(null);

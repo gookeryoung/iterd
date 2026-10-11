@@ -144,13 +144,30 @@ async def delete_artifact(artifact_id: int, user: CurrentUser, session: SessionD
 
 @router.get("/artifacts/{artifact_id}/links", response_model=list[schemas.ArtifactLinkOut])
 async def list_links(artifact_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.ArtifactLinkOut]:
-    """产物关联列表（viewer+）。"""
+    """产物关联列表（viewer+），带出对端产物编码与名称。"""
     artifact = await services.get_artifact(session, artifact_id)
     await rbac.require_project_role(
         session, artifact.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
     )
     links = await services.list_links(session, artifact_id)
-    return [schemas.ArtifactLinkOut.model_validate(link) for link in links]
+    labels = await services.get_artifact_labels(session, [link.src_artifact_id for link in links])
+    labels.update(await services.get_artifact_labels(session, [link.dst_artifact_id for link in links]))
+    outs = [schemas.ArtifactLinkOut.model_validate(link) for link in links]
+    for out in outs:
+        src = labels.get(out.src_artifact_id)
+        dst = labels.get(out.dst_artifact_id)
+        out.src_code, out.src_name = src or ("", "")
+        out.dst_code, out.dst_name = dst or ("", "")
+    return outs
+
+
+@router.delete("/artifacts/{artifact_id}/links/{link_id}", status_code=204)
+async def delete_link(artifact_id: int, link_id: int, user: CurrentUser, session: SessionDep) -> None:
+    """删除产物关联（designer+）。"""
+    artifact = await services.get_artifact(session, artifact_id)
+    await rbac.require_project_role(session, artifact.project_id, user.id, "designer", is_superuser=user.is_superuser)
+    await services.delete_link(session, actor_id=user.id, artifact_id=artifact_id, link_id=link_id)
+    await session.commit()
 
 
 @router.post("/artifacts/{artifact_id}/links", response_model=schemas.ArtifactLinkOut, status_code=201)
@@ -169,6 +186,23 @@ async def create_link(
     )
     await session.commit()
     return schemas.ArtifactLinkOut.model_validate(link)
+
+
+@router.get("/versions/{version_id}/preview")
+async def preview_version(version_id: int, user: CurrentUser, session: SessionDep) -> Response:
+    """在线预览版本内容（viewer+）：图片/PDF 直出，文本类（含 Markdown）返回文本。"""
+    version = await services.get_version(session, version_id)
+    artifact = await services.get_artifact(session, version.artifact_id)
+    await rbac.require_project_role(
+        session, artifact.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    _kind, content_type = await services.resolve_preview(version)
+    data = get_storage().open(version.storage_key).read()
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'inline; filename="{version.filename}"'},
+    )
 
 
 @router.get("/versions/{version_id}", response_model=schemas.ArtifactVersionOut)

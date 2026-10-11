@@ -9,6 +9,7 @@ import type {
   IterationStatus,
   Member,
   MemberRole,
+  MyRole,
   Project,
   ProjectInput,
   User,
@@ -36,9 +37,21 @@ export async function createProject(data: ProjectInput): Promise<Project> {
   return resp.data;
 }
 
+/** 更新项目（编码与父级不可变，后端 PATCH）。 */
+export async function updateProject(id: number, data: ProjectInput): Promise<Project> {
+  const resp = await api.patch<Project>(`/projects/${id}`, data);
+  return resp.data;
+}
+
 /** 项目成员列表。 */
 export async function fetchMembers(projectId: number): Promise<Member[]> {
   const resp = await api.get<Member[]>(`/projects/${projectId}/members`);
+  return resp.data;
+}
+
+/** 当前用户在项目内的角色与能力位。 */
+export async function fetchMyRole(projectId: number): Promise<MyRole> {
+  const resp = await api.get<MyRole>(`/projects/${projectId}/me`);
   return resp.data;
 }
 
@@ -72,10 +85,16 @@ export async function fetchIteration(id: number): Promise<Iteration> {
   return resp.data;
 }
 
-/** 更新迭代（含状态迁移，非法迁移后端返回 400）。 */
+/** 更新迭代（含状态迁移与时间窗，非法迁移后端返回 400）。 */
 export async function updateIteration(
   id: number,
-  fields: { status?: IterationStatus; title?: string; objective?: string },
+  fields: {
+    status?: IterationStatus;
+    title?: string;
+    objective?: string;
+    start_date?: string | null;
+    end_date?: string | null;
+  },
 ): Promise<Iteration> {
   const resp = await api.patch<Iteration>(`/iterations/${id}`, fields);
   return resp.data;

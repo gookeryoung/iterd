@@ -36,16 +36,52 @@ def role_at_least(actual: str | Role, required: str | Role) -> bool:
 
 
 async def get_project_role(
-    session: AsyncSession, project_id: int, user_id: int, is_superuser: bool = False
+    session: AsyncSession,
+    project_id: int,
+    user_id: int,
+    is_superuser: bool = False,
+    *,
+    include_ancestor: bool = False,
 ) -> Role | None:
-    """查询用户在项目内的角色；超级管理员视为 owner。"""
+    """查询用户在项目内的角色；超级管理员视为 owner。
+
+    include_ancestor=True 时本项目的直接角色缺失则沿父项目向上继承。
+    """
     if is_superuser:
         return Role.owner
+    role = await _direct_role(session, project_id, user_id)
+    if role is not None or not include_ancestor:
+        return role
+    return await _inherited_role(session, project_id, user_id)
+
+
+async def _direct_role(session: AsyncSession, project_id: int, user_id: int) -> Role | None:
+    """查询用户在指定项目上的直接角色。"""
     row = await session.execute(
         select(ProjectMember.role).where(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
     )
     role = row.scalar_one_or_none()
     return Role(role) if role is not None else None
+
+
+async def _inherited_role(session: AsyncSession, project_id: int, user_id: int) -> Role | None:
+    """沿项目树向上查找最近的有效角色（防环，最多 10 层）。"""
+    current_id: int | None = project_id
+    visited: set[int] = set()
+    for _ in range(10):
+        if current_id is None or current_id in visited:
+            return None
+        visited.add(current_id)
+        project = await session.get(Project, current_id)
+        if project is None:
+            return None
+        current_id = project.parent_id
+        if current_id is None:
+            return None
+        role = await _direct_role(session, current_id, user_id)
+        if role is not None:
+            return role
+    return None
 
 
 async def require_project_role(  # noqa: PLR0913 - 鉴权参数

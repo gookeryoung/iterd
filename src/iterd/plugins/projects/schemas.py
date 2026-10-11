@@ -41,7 +41,7 @@ class MemberIn(BaseModel):
 
 
 class MemberOut(BaseModel):
-    """成员对外结构."""
+    """成员对外结构（username 由路由层联表填充，便于非管理员查看）."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,6 +49,19 @@ class MemberOut(BaseModel):
     project_id: int
     user_id: int
     role: str
+    username: str = ""
+
+
+class MyRoleOut(BaseModel):
+    """当前用户在项目内的角色（含超管与父项目继承结果）."""
+
+    project_id: int
+    user_id: int
+    role: str | None
+    is_superuser: bool
+    can_manage: bool
+    can_design: bool
+    can_review: bool
 
 
 class IterationIn(BaseModel):

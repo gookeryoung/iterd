@@ -240,7 +240,9 @@ def test_artifact_endpoint_edges(client: TestClient, project: dict[str, Any], it
 
 def test_task_list_filter_and_ws_missing(client: TestClient) -> None:
     assert client.get("/api/v1/tasks", params={"status": "succeeded", "limit": 5}).status_code == 200
+    token = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
     with client.websocket_connect("/api/v1/ws/tasks/99999") as ws:
+        ws.send_json({"token": token})
         message = ws.receive_json()
         assert message["error"] == "task not found"
 

@@ -1,9 +1,10 @@
 /** 项目详情页：项目信息 + 迭代 / 成员 Tabs。 */
 
-import { Descriptions, Spin, Tabs, Typography } from 'antd';
+import { Descriptions, Spin, Tabs, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { fetchProject } from '../api/projects';
+import { fetchMyRole, fetchProject } from '../api/projects';
+import { ROLE_LABELS } from '../types';
 import { formatDateTime } from '../utils/format';
 import IterationsTab from '../components/IterationsTab';
 import MembersTab from '../components/MembersTab';
@@ -16,6 +17,13 @@ export default function ProjectDetailPage() {
     queryKey: ['project', projectId],
     queryFn: () => fetchProject(projectId),
     enabled: Number.isFinite(projectId),
+  });
+
+  const myRoleQuery = useQuery({
+    queryKey: ['project-role', projectId],
+    queryFn: () => fetchMyRole(projectId),
+    enabled: Number.isFinite(projectId),
+    retry: false,
   });
 
   if (projectQuery.isPending) {
@@ -36,6 +44,11 @@ export default function ProjectDetailPage() {
     <div>
       <Typography.Title level={4} style={{ marginTop: 0 }}>
         {project.name}
+        {myRoleQuery.data?.role && (
+          <Tag color="blue" style={{ marginLeft: 12, fontSize: 13, fontWeight: 400 }}>
+            我的角色：{myRoleQuery.data.is_superuser ? '超级管理员' : ROLE_LABELS[myRoleQuery.data.role]}
+          </Tag>
+        )}
       </Typography.Title>
       <Descriptions size="small" column={3} style={{ marginBottom: 16 }}>
         <Descriptions.Item label="编码">{project.code}</Descriptions.Item>

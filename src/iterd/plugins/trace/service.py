@@ -17,6 +17,9 @@ NODE_TYPES = (
     "rule_item",
     "baseline",
     "check_finding",
+    "sim_template",
+    "sim_job",
+    "sim_result",
 )
 
 # 递归方向 -> (边条件模板, 下一跳列)；w 为递归工作表别名

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -88,6 +89,32 @@ async def get_rule_set(session: AsyncSession, rule_set_id: int) -> RuleSet:
     if rule_set is None:
         raise not_found(f"规则集不存在: {rule_set_id}")
     return rule_set
+
+
+async def get_rule_set_rules(session: AsyncSession, rule_set_id: int) -> list[int]:
+    """规则集内的规则 id 列表。"""
+    rows = (
+        await session.execute(
+            select(RuleSetItem.rule_item_id).where(RuleSetItem.rule_set_id == rule_set_id).order_by(RuleSetItem.id)
+        )
+    ).scalars()
+    return [int(r) for r in rows]
+
+
+async def set_rule_set_rules(session: AsyncSession, *, rule_set_id: int, rule_ids: list[int]) -> list[int]:
+    """向规则集批量添加规则（幂等，已存在跳过）。"""
+    await get_rule_set(session, rule_set_id)
+    for rule_id in rule_ids:
+        await add_rule_to_set(session, rule_set_id=rule_set_id, rule_id=rule_id)
+    return await get_rule_set_rules(session, rule_set_id)
+
+
+async def get_binding(session: AsyncSession, iteration_id: int) -> int | None:
+    """查询迭代绑定的规则集（未绑定返回 None）。"""
+    row = (
+        await session.execute(select(RuleSetBinding.rule_set_id).where(RuleSetBinding.iteration_id == iteration_id))
+    ).scalar_one_or_none()
+    return int(row) if row is not None else None
 
 
 async def list_rule_sets(session: AsyncSession, *, project_id: int | None = None) -> list[RuleSet]:
@@ -194,6 +221,71 @@ async def create_check_run(
         after={"iteration_id": iteration_id, "rule_set_id": rule_set_id},
     )
     return check_run, task
+
+
+@dataclass
+class FindingRecord:
+    """发现项 + 规则/产物展示信息（报告页免二次查询）。"""
+
+    finding: CheckFinding
+    rule_code: str
+    rule_name: str
+    artifact_code: str
+    artifact_name: str
+    version_no: int
+
+
+async def list_findings(  # noqa: PLR0913 - 过滤参数
+    session: AsyncSession,
+    *,
+    check_run_id: int,
+    severity: str | None = None,
+    artifact_version_id: int | None = None,
+    rule_item_id: int | None = None,
+    limit: int = 500,
+) -> list[FindingRecord]:
+    """结构化报告查询：按严重级别/产物版本/规则过滤，联表带出规则与产物信息。"""
+    stmt = (
+        select(CheckFinding, RuleItem, Artifact, ArtifactVersion)
+        .join(RuleItem, RuleItem.id == CheckFinding.rule_item_id)
+        .join(ArtifactVersion, ArtifactVersion.id == CheckFinding.artifact_version_id)
+        .join(Artifact, Artifact.id == ArtifactVersion.artifact_id)
+        .where(CheckFinding.check_run_id == check_run_id)
+    )
+    if severity is not None:
+        stmt = stmt.where(CheckFinding.severity == severity)
+    if artifact_version_id is not None:
+        stmt = stmt.where(CheckFinding.artifact_version_id == artifact_version_id)
+    if rule_item_id is not None:
+        stmt = stmt.where(CheckFinding.rule_item_id == rule_item_id)
+    stmt = stmt.order_by(CheckFinding.id).limit(limit)
+    rows = (await session.execute(stmt)).all()
+    return [
+        FindingRecord(
+            finding=finding,
+            rule_code=rule.code,
+            rule_name=rule.name,
+            artifact_code=artifact.code,
+            artifact_name=artifact.name,
+            version_no=version.version_no,
+        )
+        for finding, rule, artifact, version in rows
+    ]
+
+
+async def get_check_run_task_id(session: AsyncSession, check_run_id: int) -> int | None:
+    """取检查运行对应的任务 id（用于前端 WS 订阅进度）。"""
+    from iterd.tasks.models import Task
+
+    row = (
+        await session.execute(
+            select(Task.id).where(
+                Task.task_type == "check_run",
+                Task.payload["check_run_id"].as_integer() == check_run_id,
+            )
+        )
+    ).scalar_one_or_none()
+    return int(row) if row is not None else None
 
 
 # ---- 检查执行（worker 侧）----

@@ -71,12 +71,34 @@ async def update_project(
 
 @router.get("/projects/{project_id}/members", response_model=list[schemas.MemberOut])
 async def list_members(project_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.MemberOut]:
-    """项目成员列表（viewer+）。"""
+    """项目成员列表（viewer+），联表带出用户名。"""
     await rbac.require_project_role(
         session, project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
     )
     members = await services.list_members(session, project_id)
-    return [schemas.MemberOut.model_validate(m) for m in members]
+    name_map = await services.get_user_names(session, [m.user_id for m in members])
+    outs = [schemas.MemberOut.model_validate(m) for m in members]
+    for out in outs:
+        out.username = name_map.get(out.user_id, "")
+    return outs
+
+
+@router.get("/projects/{project_id}/me", response_model=schemas.MyRoleOut)
+async def my_role(project_id: int, user: CurrentUser, session: SessionDep) -> schemas.MyRoleOut:
+    """当前用户在项目内的角色与能力位（含超管与父项目继承）。"""
+    role = await rbac.get_project_role(
+        session, project_id, user.id, is_superuser=user.is_superuser, include_ancestor=True
+    )
+    role_name = role.name if role is not None else None
+    return schemas.MyRoleOut(
+        project_id=project_id,
+        user_id=user.id,
+        role=role_name,
+        is_superuser=user.is_superuser,
+        can_manage=role is not None and role >= rbac.Role.admin,
+        can_design=role is not None and role >= rbac.Role.designer,
+        can_review=role is not None and role >= rbac.Role.reviewer,
+    )
 
 
 @router.put("/projects/{project_id}/members", response_model=schemas.MemberOut, status_code=201)

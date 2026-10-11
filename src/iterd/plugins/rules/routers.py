@@ -7,15 +7,24 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from iterd.api.deps import CurrentUser, SessionDep
+from iterd.core.errors import permission_denied
 from iterd.plugins.projects import rbac
 from iterd.plugins.projects import services as project_services
 from iterd.plugins.rules import schemas, services
-from iterd.plugins.rules.models import CheckFinding, CheckRun
+from iterd.plugins.rules.models import CheckRun
 
 router = APIRouter(prefix="/api/v1", tags=["rules"])
 
 
 # ---- 规则库 ----
+
+
+@router.get("/checkers", response_model=list[dict[str, str]])
+async def list_checkers(_user: CurrentUser) -> list[dict[str, str]]:
+    """已注册检查器清单（新建规则时供前端下拉选择）。"""
+    from iterd.checkers import checker_manifest
+
+    return checker_manifest()
 
 
 @router.get("/rules", response_model=list[schemas.RuleItemOut])
@@ -91,6 +100,56 @@ async def bind_rule_set(rule_set_id: int, body: BindBody, user: CurrentUser, ses
     return schemas.RuleSetOut.model_validate(await services.get_rule_set(session, rule_set_id))
 
 
+@router.get("/rule-sets/{rule_set_id}", response_model=schemas.RuleSetDetailOut)
+async def get_rule_set(rule_set_id: int, user: CurrentUser, session: SessionDep) -> schemas.RuleSetDetailOut:
+    """规则集详情（含成员规则 id）。"""
+    rule_set = await services.get_rule_set(session, rule_set_id)
+    if rule_set.project_id is not None:
+        await rbac.require_project_role(
+            session,
+            rule_set.project_id,
+            user.id,
+            "viewer",
+            is_superuser=user.is_superuser,
+            include_ancestor=True,
+        )
+    out = schemas.RuleSetDetailOut.model_validate(rule_set)
+    out.rule_ids = await services.get_rule_set_rules(session, rule_set_id)
+    return out
+
+
+@router.post("/rule-sets/{rule_set_id}/rules", response_model=schemas.RuleSetDetailOut, status_code=201)
+async def add_rules_to_set(
+    rule_set_id: int, body: schemas.RuleSetRuleIn, user: CurrentUser, session: SessionDep
+) -> schemas.RuleSetDetailOut:
+    """向规则集批量添加规则（designer+；全局规则集需超管）。"""
+    rule_set = await services.get_rule_set(session, rule_set_id)
+    if rule_set.project_id is None:
+        if not user.is_superuser:
+            raise permission_denied("全局规则集仅超级管理员可维护")
+    else:
+        await rbac.require_project_role(
+            session, rule_set.project_id, user.id, "designer", is_superuser=user.is_superuser
+        )
+    rule_ids = await services.set_rule_set_rules(session, rule_set_id=rule_set_id, rule_ids=body.rule_ids)
+    await session.commit()
+    out = schemas.RuleSetDetailOut.model_validate(rule_set)
+    out.rule_ids = rule_ids
+    return out
+
+
+@router.get("/iterations/{iteration_id}/rule-set-binding", response_model=schemas.RuleSetBindingOut)
+async def get_rule_set_binding(iteration_id: int, user: CurrentUser, session: SessionDep) -> schemas.RuleSetBindingOut:
+    """查询迭代已绑定的规则集（viewer+，未绑定返回 null）。"""
+    iteration = await project_services.get_iteration(session, iteration_id)
+    await rbac.require_project_role(
+        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    return schemas.RuleSetBindingOut(
+        iteration_id=iteration_id, rule_set_id=await services.get_binding(session, iteration_id)
+    )
+
+
 # ---- 检查运行与报告 ----
 
 
@@ -105,12 +164,14 @@ async def create_check_run(
         session, actor_id=user.id, iteration_id=iteration_id, rule_set_id=body.rule_set_id
     )
     await session.commit()
-    return schemas.CheckRunOut.model_validate(check_run)
+    out = schemas.CheckRunOut.model_validate(check_run)
+    out.task_id = await services.get_check_run_task_id(session, check_run.id)
+    return out
 
 
 @router.get("/iterations/{iteration_id}/check-runs", response_model=list[schemas.CheckRunOut])
 async def list_check_runs(iteration_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.CheckRunOut]:
-    """迭代下检查运行列表（viewer+）。"""
+    """迭代下检查运行列表（viewer+），带出任务 id 便于订阅进度。"""
     iteration = await project_services.get_iteration(session, iteration_id)
     await rbac.require_project_role(
         session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
@@ -120,12 +181,15 @@ async def list_check_runs(iteration_id: int, user: CurrentUser, session: Session
             await session.execute(select(CheckRun).where(CheckRun.iteration_id == iteration_id).order_by(CheckRun.id))
         ).scalars()
     )
-    return [schemas.CheckRunOut.model_validate(r) for r in runs]
+    outs = [schemas.CheckRunOut.model_validate(r) for r in runs]
+    for out in outs:
+        out.task_id = await services.get_check_run_task_id(session, out.id)
+    return outs
 
 
 @router.get("/check-runs/{check_run_id}", response_model=schemas.CheckRunOut)
 async def get_check_run(check_run_id: int, user: CurrentUser, session: SessionDep) -> schemas.CheckRunOut:
-    """检查运行详情。"""
+    """检查运行详情（含任务 id）。"""
     run = await session.get(CheckRun, check_run_id)
     if run is None:
         from iterd.core.errors import not_found
@@ -135,7 +199,9 @@ async def get_check_run(check_run_id: int, user: CurrentUser, session: SessionDe
     await rbac.require_project_role(
         session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
     )
-    return schemas.CheckRunOut.model_validate(run)
+    out = schemas.CheckRunOut.model_validate(run)
+    out.task_id = await services.get_check_run_task_id(session, run.id)
+    return out
 
 
 @router.get("/check-runs/{check_run_id}/findings", response_model=list[schemas.CheckFindingOut])
@@ -148,7 +214,7 @@ async def list_findings(  # noqa: PLR0913, PLR0917 - 过滤参数
     rule_item_id: int | None = None,
     limit: int = Query(default=500, le=2000),
 ) -> list[schemas.CheckFindingOut]:
-    """结构化报告查询：按严重级别/产物版本/规则过滤（viewer+）。"""
+    """结构化报告查询：按严重级别/产物版本/规则过滤（viewer+），含规则与产物信息。"""
     run = await session.get(CheckRun, check_run_id)
     if run is None:
         from iterd.core.errors import not_found
@@ -158,13 +224,19 @@ async def list_findings(  # noqa: PLR0913, PLR0917 - 过滤参数
     await rbac.require_project_role(
         session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
     )
-    stmt = select(CheckFinding).where(CheckFinding.check_run_id == check_run_id)
-    if severity is not None:
-        stmt = stmt.where(CheckFinding.severity == severity)
-    if artifact_version_id is not None:
-        stmt = stmt.where(CheckFinding.artifact_version_id == artifact_version_id)
-    if rule_item_id is not None:
-        stmt = stmt.where(CheckFinding.rule_item_id == rule_item_id)
-    stmt = stmt.order_by(CheckFinding.id).limit(limit)
-    findings = list((await session.execute(stmt)).scalars())
-    return [schemas.CheckFindingOut.model_validate(f) for f in findings]
+    records = await services.list_findings(
+        session,
+        check_run_id=check_run_id,
+        severity=severity,
+        artifact_version_id=artifact_version_id,
+        rule_item_id=rule_item_id,
+        limit=limit,
+    )
+    outs = [schemas.CheckFindingOut.model_validate(record.finding) for record in records]
+    for out, record in zip(outs, records, strict=True):
+        out.rule_code = record.rule_code
+        out.rule_name = record.rule_name
+        out.artifact_code = record.artifact_code
+        out.artifact_name = record.artifact_name
+        out.version_no = record.version_no
+    return outs

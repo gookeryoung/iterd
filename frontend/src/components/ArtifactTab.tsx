@@ -1,19 +1,30 @@
-/** 迭代详情 - 产物 Tab：产物列表 / 新建产物 / 上传新版本 / 版本历史与下载。 */
+/** 迭代详情 - 产物 Tab：产物列表 / 新建 / 上传版本 / 版本历史与预览下载 / 关联 / 编辑 / 软删。 */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Button,
   Drawer,
   Form,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Table,
+  Tag,
   Upload,
   Typography,
 } from 'antd';
-import { InboxOutlined, PlusOutlined, UploadOutlined, HistoryOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  HistoryOutlined,
+  InboxOutlined,
+  LinkOutlined,
+  PlusOutlined,
+  UploadOutlined,
+  EyeOutlined,
+} from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,9 +32,15 @@ import { App as AntApp } from 'antd';
 import {
   CATEGORY_OPTIONS,
   createArtifact,
+  createLink,
+  deleteArtifact,
+  deleteLink,
   downloadVersion,
   fetchArtifacts,
+  fetchLinks,
   fetchVersions,
+  LINK_TYPE_OPTIONS,
+  updateArtifact,
   uploadVersion,
 } from '../api/artifacts';
 import { extractErrorMessage } from '../api/client';
@@ -31,9 +48,12 @@ import {
   type Artifact,
   type ArtifactCategory,
   type ArtifactInput,
+  type ArtifactLink,
   type ArtifactVersion,
+  type LinkType,
 } from '../types';
 import { CategoryTag } from './StatusTags';
+import PreviewDrawer from './PreviewDrawer';
 import { formatDateTime, formatSize, shortSha } from '../utils/format';
 
 /** 新建产物表单值。 */
@@ -42,6 +62,14 @@ interface ArtifactFormValues {
   name: string;
   category: ArtifactCategory;
   description?: string;
+}
+
+/** 编辑产物表单值。 */
+interface EditFormValues {
+  name: string;
+  description?: string;
+  category: ArtifactCategory;
+  metadata?: string;
 }
 
 /** 上传版本表单值。 */
@@ -61,6 +89,13 @@ interface ArtifactTabProps {
   iterationId: number;
 }
 
+/** 关联类型中文标签。 */
+const LINK_LABELS: Record<LinkType, string> = {
+  part_of: '组成',
+  refers_to: '引用',
+  derived_from: '派生',
+};
+
 /** 渲染版本元数据 JSON。 */
 function renderMetadata(metadata: Record<string, unknown> | null): string {
   if (!metadata || Object.keys(metadata).length === 0) {
@@ -74,22 +109,40 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
   const { message } = AntApp.useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Artifact | null>(null);
   const [versionDrawer, setVersionDrawer] = useState<VersionDrawerState>({ open: false, artifact: null });
+  const [linkTarget, setLinkTarget] = useState<Artifact | null>(null);
+  const [preview, setPreview] = useState<{ version: ArtifactVersion } | null>(null);
   const [uploadTarget, setUploadTarget] = useState<Artifact | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [artifactForm] = Form.useForm<ArtifactFormValues>();
+  const [editForm] = Form.useForm<EditFormValues>();
   const [uploadForm] = Form.useForm<UploadFormValues>();
+  const [linkForm] = Form.useForm<{ dst_artifact_id: number; link_type: LinkType }>();
 
   const artifactsQuery = useQuery({
     queryKey: ['artifacts', iterationId],
     queryFn: () => fetchArtifacts({ iteration_id: iterationId }),
   });
 
+  const artifacts = artifactsQuery.data ?? [];
+  const artifactNameMap = useMemo(
+    () => new Map(artifacts.map((item) => [item.id, `${item.code} ${item.name}`])),
+    [artifacts],
+  );
+
   // 版本历史（Drawer 打开时拉取）
   const versionsQuery = useQuery({
     queryKey: ['versions', versionDrawer.artifact?.id],
     queryFn: () => fetchVersions(versionDrawer.artifact?.id as number),
     enabled: versionDrawer.open && versionDrawer.artifact !== null,
+  });
+
+  // 关联列表（Drawer 打开时拉取）
+  const linksQuery = useQuery({
+    queryKey: ['artifact-links', linkTarget?.id],
+    queryFn: () => fetchLinks(linkTarget?.id as number),
+    enabled: linkTarget !== null,
   });
 
   const invalidateArtifacts = () => {
@@ -118,12 +171,62 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
       uploadForm.resetFields();
       setFileList([]);
       invalidateArtifacts();
-      // 若版本历史 Drawer 打开，联动刷新
       if (versionDrawer.open && versionDrawer.artifact) {
-        void queryClient.invalidateQueries({
-          queryKey: ['versions', versionDrawer.artifact.id],
-        });
+        void queryClient.invalidateQueries({ queryKey: ['versions', versionDrawer.artifact.id] });
       }
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: ({ id, values }: { id: number; values: EditFormValues }) =>
+      updateArtifact(id, {
+        name: values.name.trim(),
+        description: values.description?.trim() ?? '',
+        category: values.category,
+        metadata: values.metadata && values.metadata.trim() ? (JSON.parse(values.metadata) as Record<string, unknown>) : null,
+      }),
+    onSuccess: () => {
+      message.success('产物已更新');
+      setEditTarget(null);
+      invalidateArtifacts();
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteArtifact(id),
+    onSuccess: () => {
+      message.success('产物已删除（软删，历史版本保留）');
+      invalidateArtifacts();
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const createLinkMutation = useMutation({
+    mutationFn: ({ id, values }: { id: number; values: { dst_artifact_id: number; link_type: LinkType } }) =>
+      createLink(id, values),
+    onSuccess: () => {
+      message.success('关联已创建');
+      linkForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['artifact-links', linkTarget?.id] });
+    },
+    onError: (error: unknown) => {
+      message.error(extractErrorMessage(error));
+    },
+  });
+
+  const deleteLinkMutation = useMutation({
+    mutationFn: ({ id, linkId }: { id: number; linkId: number }) => deleteLink(id, linkId),
+    onSuccess: () => {
+      message.success('关联已删除');
+      void queryClient.invalidateQueries({ queryKey: ['artifact-links', linkTarget?.id] });
     },
     onError: (error: unknown) => {
       message.error(extractErrorMessage(error));
@@ -168,6 +271,17 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
     });
   };
 
+  /** 打开编辑弹窗（元数据回填为 JSON 字符串）。 */
+  const openEdit = (artifact: Artifact) => {
+    setEditTarget(artifact);
+    editForm.setFieldsValue({
+      name: artifact.name,
+      description: artifact.description,
+      category: artifact.category,
+      metadata: '',
+    });
+  };
+
   const artifactColumns: ColumnsType<Artifact> = [
     { title: '编码', dataIndex: 'code', key: 'code', width: 140 },
     { title: '名称', dataIndex: 'name', key: 'name' },
@@ -188,9 +302,9 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
     {
       title: '操作',
       key: 'actions',
-      width: 240,
+      width: 400,
       render: (_: unknown, record: Artifact) => (
-        <Space>
+        <Space size={0}>
           <Button
             type="link"
             size="small"
@@ -212,6 +326,28 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
           >
             版本历史
           </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<LinkOutlined />}
+            onClick={() => setLinkTarget(record)}
+          >
+            关联
+          </Button>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+          <Popconfirm
+            title="确认删除该产物？"
+            description="软删后列表不可见，历史版本与存储对象保留。"
+            okText="删除"
+            cancelText="取消"
+            onConfirm={() => deleteMutation.mutate(record.id)}
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -252,17 +388,69 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
     {
       title: '操作',
       key: 'actions',
-      width: 90,
+      width: 160,
       render: (_: unknown, record: ArtifactVersion) => (
-        <Button
-          type="link"
-          size="small"
-          loading={downloadMutation.isPending && downloadMutation.variables?.id === record.id}
-          onClick={() => downloadMutation.mutate(record)}
-        >
-          下载
-        </Button>
+        <Space size={0}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => setPreview({ version: record })}
+          >
+            预览
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            loading={downloadMutation.isPending && downloadMutation.variables?.id === record.id}
+            onClick={() => downloadMutation.mutate(record)}
+          >
+            下载
+          </Button>
+        </Space>
       ),
+    },
+  ];
+
+  const linkColumns: ColumnsType<ArtifactLink> = [
+    {
+      title: '类型',
+      dataIndex: 'link_type',
+      key: 'link_type',
+      width: 100,
+      render: (type: LinkType) => <Tag>{LINK_LABELS[type] ?? type}</Tag>,
+    },
+    {
+      title: '关联产物',
+      key: 'peer',
+      render: (_: unknown, record: ArtifactLink) => {
+        const peerId = record.src_artifact_id === linkTarget?.id ? record.dst_artifact_id : record.src_artifact_id;
+        return artifactNameMap.get(peerId) ?? `产物 #${peerId}`;
+      },
+    },
+    {
+      title: '方向',
+      key: 'direction',
+      width: 100,
+      render: (_: unknown, record: ArtifactLink) =>
+        record.src_artifact_id === linkTarget?.id ? '本产物 →' : '→ 本产物',
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 100,
+      render: (_: unknown, record: ArtifactLink) =>
+        linkTarget && (
+          <Button
+            type="link"
+            size="small"
+            danger
+            loading={deleteLinkMutation.isPending}
+            onClick={() => deleteLinkMutation.mutate({ id: linkTarget.id, linkId: record.id })}
+          >
+            删除
+          </Button>
+        ),
     },
   ];
 
@@ -284,7 +472,7 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
       <Table<Artifact>
         rowKey="id"
         columns={artifactColumns}
-        dataSource={artifactsQuery.data ?? []}
+        dataSource={artifacts}
         loading={artifactsQuery.isPending}
         pagination={false}
         locale={{ emptyText: '暂无产物' }}
@@ -321,6 +509,40 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
         </Form>
       </Modal>
 
+      {/* 编辑产物 */}
+      <Modal
+        title={`编辑产物${editTarget ? ` - ${editTarget.code}` : ''}`}
+        open={editTarget !== null}
+        confirmLoading={editMutation.isPending}
+        onOk={() => editForm.submit()}
+        onCancel={() => setEditTarget(null)}
+        destroyOnClose
+      >
+        <Form<EditFormValues>
+          form={editForm}
+          layout="vertical"
+          onFinish={(values) => editMutation.mutate({ id: editTarget?.id as number, values })}
+        >
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入产物名称' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="category" label="类别" rules={[{ required: true, message: '请选择类别' }]}>
+            <Select<ArtifactCategory> options={CATEGORY_OPTIONS} />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item
+            name="metadata"
+            label="当前版本元数据（JSON）"
+            extra="留空表示不修改；填写后将覆盖当前版本的元数据"
+            rules={[{ validator: validateMetadata }]}
+          >
+            <Input.TextArea rows={3} placeholder='如 {"材料": "Q235"}' />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       {/* 上传新版本 */}
       <Modal
         title={`上传新版本${uploadTarget ? ` - ${uploadTarget.name}` : ''}`}
@@ -352,7 +574,7 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
             label="元数据（JSON）"
             rules={[{ validator: validateMetadata }]}
           >
-            <Input.TextArea rows={3} placeholder='如 {"source": "CAD"}（可选）' />
+            <Input.TextArea rows={3} placeholder='如 {"材料": "Q235", "尺寸": "100x50"}（可选）' />
           </Form.Item>
         </Form>
       </Modal>
@@ -360,7 +582,7 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
       {/* 版本历史 Drawer */}
       <Drawer
         title={`版本历史${versionDrawer.artifact ? ` - ${versionDrawer.artifact.name}` : ''}`}
-        width={900}
+        width={960}
         open={versionDrawer.open}
         onClose={() => setVersionDrawer({ open: false, artifact: null })}
       >
@@ -374,6 +596,60 @@ export default function ArtifactTab({ iterationId }: ArtifactTabProps) {
           locale={{ emptyText: '暂无版本' }}
         />
       </Drawer>
+
+      {/* 关联管理 Drawer */}
+      <Drawer
+        title={`产物关联${linkTarget ? ` - ${linkTarget.code}` : ''}`}
+        width={760}
+        open={linkTarget !== null}
+        onClose={() => setLinkTarget(null)}
+      >
+        <Form<{ dst_artifact_id: number; link_type: LinkType }>
+          form={linkForm}
+          layout="inline"
+          style={{ marginBottom: 16 }}
+          onFinish={(values) =>
+            createLinkMutation.mutate({ id: linkTarget?.id as number, values })
+          }
+        >
+          <Form.Item name="dst_artifact_id" rules={[{ required: true, message: '请选择关联产物' }]}>
+            <Select<number>
+              style={{ width: 260 }}
+              placeholder="选择本迭代内的产物"
+              showSearch
+              optionFilterProp="label"
+              options={artifacts
+                .filter((item) => item.id !== linkTarget?.id)
+                .map((item) => ({ value: item.id, label: `${item.code} ${item.name}` }))}
+            />
+          </Form.Item>
+          <Form.Item name="link_type" initialValue="part_of">
+            <Select<LinkType> style={{ width: 200 }} options={LINK_TYPE_OPTIONS} />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={createLinkMutation.isPending}>
+              添加关联
+            </Button>
+          </Form.Item>
+        </Form>
+        <Table<ArtifactLink>
+          rowKey="id"
+          columns={linkColumns}
+          dataSource={linksQuery.data ?? []}
+          loading={linksQuery.isPending}
+          pagination={false}
+          size="small"
+          locale={{ emptyText: '暂无关联' }}
+        />
+      </Drawer>
+
+      {/* 在线预览 */}
+      <PreviewDrawer
+        versionId={preview?.version.id ?? null}
+        filename={preview?.version.filename ?? ''}
+        size={preview?.version.size ?? 0}
+        onClose={() => setPreview(null)}
+      />
     </div>
   );
 }

@@ -91,6 +91,43 @@ def test_owner_only_grant(client: TestClient, project: dict[str, Any]) -> None:
     assert resp.status_code in (201, 403)
 
 
+def test_member_list_carries_username(client: TestClient, project: dict[str, Any]) -> None:
+    members = client.get(f"/api/v1/projects/{project['id']}/members")
+    assert members.status_code == 200
+    rows = members.json()
+    assert rows and rows[0]["username"] == "admin"
+
+
+def test_my_role_and_ancestor_inheritance(client: TestClient, project: dict[str, Any]) -> None:
+    me = client.get(f"/api/v1/projects/{project['id']}/me")
+    assert me.status_code == 200
+    body = me.json()
+    assert body["role"] == "owner"
+    assert body["can_manage"] is True
+
+    child = client.post("/api/v1/projects", json={"code": "P1-SUB2", "name": "子项目", "parent_id": project["id"]})
+    assert child.status_code == 201
+    # 直接成员缺失时继承父项目角色
+    inherited = client.get(f"/api/v1/projects/{child.json()['id']}/me")
+    assert inherited.status_code == 200
+    assert inherited.json()["role"] == "owner"
+
+
+def test_iteration_time_window(client: TestClient, project: dict[str, Any]) -> None:
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/iterations",
+        json={"title": "带时间窗", "start_date": "2026-01-01", "end_date": "2026-01-31"},
+    )
+    assert created.status_code == 201
+    assert created.json()["start_date"] == "2026-01-01"
+    updated = client.patch(
+        f"/api/v1/iterations/{created.json()['id']}",
+        json={"title": "带时间窗", "end_date": "2026-02-28"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["end_date"] == "2026-02-28"
+
+
 def test_baseline_locks_versions(client: TestClient, project: dict[str, Any], iteration: dict[str, Any]) -> None:
     # planned 迭代不允许建基线
     early = client.post(f"/api/v1/iterations/{iteration['id']}/baselines", json={"name": "早期基线"})

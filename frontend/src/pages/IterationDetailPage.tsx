@@ -8,6 +8,7 @@ import { fetchIteration } from '../api/projects';
 import { IterationStatusTag } from '../components/StatusTags';
 import ArtifactTab from '../components/ArtifactTab';
 import CheckTab from '../components/CheckTab';
+import SimTab from '../components/SimTab';
 import BaselineTab from '../components/BaselineTab';
 
 export default function IterationDetailPage() {
@@ -70,6 +71,13 @@ export default function IterationDetailPage() {
             label: '规则检查',
             children: (
               <CheckTab iterationId={iterationId} projectId={iteration.project_id} />
+            ),
+          },
+          {
+            key: 'simulation',
+            label: '仿真验证',
+            children: (
+              <SimTab iterationId={iterationId} projectId={iteration.project_id} />
             ),
           },
           {

@@ -56,10 +56,32 @@ async def get_task(task_id: int, _user: CurrentUser, session: SessionDep) -> Tas
     return TaskOut.model_validate(task)
 
 
+async def _authenticate_ws(websocket: WebSocket) -> bool:
+    """等待并校验首帧 JWT（失败则关闭连接，返回 False）。"""
+    import json
+
+    from iterd.core.config import get_settings
+    from iterd.core.security import decode_access_token
+
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        token = str(json.loads(raw).get("token", ""))
+        decode_access_token(token, get_settings())
+    except (TimeoutError, ValueError, KeyError, TypeError, IterdError):
+        await websocket.close(code=1008)
+        return False
+    return True
+
+
 @router.websocket("/ws/tasks/{task_id}")
 async def task_progress_ws(websocket: WebSocket, task_id: int) -> None:
-    """任务进度/日志流：轮询任务行推送直至终态。"""
+    """任务进度/日志流：首帧鉴权通过后轮询任务行推送直至终态。
+
+    鉴权：连接后客户端须在 10 秒内发送 `{"token": "<jwt>"}`（令牌不进 URL）。
+    """
     await websocket.accept()
+    if not await _authenticate_ws(websocket):
+        return
     last_status = None
     try:
         while True:

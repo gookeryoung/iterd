@@ -129,6 +129,39 @@ async def _link_iteration(session: AsyncSession, artifact: Artifact, version_urn
         await ensure_link(session, src=iteration_urn, dst=version_urn, link_type="contains")
 
 
+# 在线预览：P0 基础版仅支持图片 / PDF / 文本类（含 Markdown），其余类型返回 415
+PREVIEW_MAX_SIZE = 20 * 1024 * 1024
+PREVIEW_MIME_PREFIXES = ("image/", "text/")
+PREVIEW_EXACT_MIMES = ("application/pdf", "application/json", "application/xml")
+PREVIEW_TEXT_EXTENSIONS = (".md", ".markdown", ".txt", ".csv", ".log", ".json", ".xml", ".yaml", ".yml")
+
+
+async def resolve_preview(version: ArtifactVersion) -> tuple[str, str]:
+    """判定版本可否在线预览，返回 (预览类型, 响应 content_type)。
+
+    预览类型：image / pdf / text；不可预览抛 415，过大抛 413。
+    """
+    if version.size > PREVIEW_MAX_SIZE:
+        raise IterdError("文件过大，不支持在线预览（上限 20MB）", code="ITERD-PREVIEW_UNSUPPORTED", status_code=413)
+    filename = version.filename.lower()
+    content_type = (version.content_type or "").split(";")[0].strip().lower()
+    if content_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
+        return "image", content_type or "image/*"
+    if content_type == "application/pdf" or filename.endswith(".pdf"):
+        return "pdf", "application/pdf"
+    if content_type.startswith("text/") or filename.endswith(PREVIEW_TEXT_EXTENSIONS):
+        if filename.endswith((".md", ".markdown")):
+            return "text", "text/markdown; charset=utf-8"
+        return "text", "text/plain; charset=utf-8"
+    if content_type in PREVIEW_EXACT_MIMES:
+        return "text", "text/plain; charset=utf-8"
+    raise IterdError(
+        f"该类型不支持在线预览: {version.content_type or version.filename}",
+        code="ITERD-PREVIEW_UNSUPPORTED",
+        status_code=415,
+    )
+
+
 async def get_version(session: AsyncSession, version_id: int) -> ArtifactVersion:
     """取版本记录，不存在抛 404."""
     version = await session.get(ArtifactVersion, version_id)
@@ -175,6 +208,8 @@ async def update_metadata(
         artifact.name = str(fields["name"])  # type: ignore[arg-type]
     if "description" in fields and fields["description"] is not None:
         artifact.description = str(fields["description"])  # type: ignore[arg-type]
+    if "category" in fields and fields["category"] is not None:
+        artifact.category = str(fields["category"])  # type: ignore[arg-type]
     if "metadata" in fields and fields["metadata"] is not None and artifact.current_version_id is not None:
         version = await session.get(ArtifactVersion, artifact.current_version_id)
         if version is not None:
@@ -250,6 +285,36 @@ async def _current_version_urn(session: AsyncSession, artifact_id: int) -> str |
             )
         )
     ).scalar_one_or_none()
+
+
+async def delete_link(session: AsyncSession, *, actor_id: int, artifact_id: int, link_id: int) -> None:
+    """删除产物关联（仅限以本产物为端点之一的关联），同步审计。"""
+    link = await session.get(ArtifactLink, link_id)
+    if link is None or artifact_id not in (link.src_artifact_id, link.dst_artifact_id):
+        raise not_found(f"关联不存在: {link_id}")
+    await session.delete(link)
+    await session.flush()
+    await audit(
+        session,
+        actor_id=actor_id,
+        actor_name="",
+        action="artifact.unlink",
+        resource_type="artifact",
+        resource_id=artifact_id,
+        before={"link_id": link_id, "link_type": link.link_type},
+    )
+
+
+async def get_artifact_labels(session: AsyncSession, artifact_ids: list[int]) -> dict[int, tuple[str, str]]:
+    """批量取产物编码与名称（关联列表展示用）。"""
+    if not artifact_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Artifact.id, Artifact.code, Artifact.name).where(Artifact.id.in_(set(artifact_ids)))
+        )
+    ).all()
+    return {int(row[0]): (str(row[1]), str(row[2])) for row in rows}
 
 
 async def list_links(session: AsyncSession, artifact_id: int) -> list[ArtifactLink]:

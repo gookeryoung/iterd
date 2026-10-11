@@ -70,7 +70,8 @@ export default function MembersTab({ projectId }: MembersTabProps) {
       title: '用户名',
       dataIndex: 'user_id',
       key: 'user_id',
-      render: (userId: number) => userNameMap.get(userId) ?? `用户 #${userId}`,
+      render: (userId: number, record: Member) =>
+        record.username || userNameMap.get(userId) || `用户 #${userId}`,
     },
     {
       title: '角色',

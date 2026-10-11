@@ -10,6 +10,14 @@ export function formatDateTime(value?: string | null): string {
   return dayjs(value).format('YYYY-MM-DD HH:mm');
 }
 
+/** 格式化日期为本地可读格式（YYYY-MM-DD）。 */
+export function formatDate(value?: string | null): string {
+  if (!value) {
+    return '-';
+  }
+  return dayjs(value).format('YYYY-MM-DD');
+}
+
 /** 字节数转可读大小。 */
 export function formatSize(bytes: number): string {
   if (bytes < 1024) {

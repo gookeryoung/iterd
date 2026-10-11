@@ -78,10 +78,19 @@ def registered_checkers() -> list[str]:
     return sorted(_registry)
 
 
+def checker_manifest() -> list[dict[str, str]]:
+    """检查器清单（供前端下拉选择）：类型 + 说明。"""
+    return [
+        {"checker_type": name, "description": str(getattr(_registry[name], "description", ""))}
+        for name in sorted(_registry)
+    ]
+
+
 class FilenameConventionChecker:
     """文件名规范检查器：按规则 params.pattern 正则校验文件名."""
 
     checker_type = "filename_convention"
+    description = "按规则 params.pattern 正则校验产物文件名"
 
     def supported_extensions(self) -> tuple[str, ...]:
         """全部文件类型。"""
@@ -107,6 +116,7 @@ class MetadataRequiredChecker:
     """元数据必填检查器：校验 metadata 必填键与类型（str/number/bool）."""
 
     checker_type = "metadata_required"
+    description = "校验产物元数据必填键与类型（str/number/bool）"
 
     _TYPES = {"str": str, "number": (int, float), "bool": bool}
 

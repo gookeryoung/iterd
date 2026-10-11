@@ -39,6 +39,7 @@ export interface ProjectInput {
   name: string;
   description?: string;
   parent_id?: number | null;
+  status?: string;
 }
 
 /** 项目成员。 */
@@ -47,6 +48,18 @@ export interface Member {
   project_id: number;
   user_id: number;
   role: MemberRole;
+  username: string;
+}
+
+/** 当前用户在项目内的角色与能力位。 */
+export interface MyRole {
+  project_id: number;
+  user_id: number;
+  role: MemberRole | null;
+  is_superuser: boolean;
+  can_manage: boolean;
+  can_design: boolean;
+  can_review: boolean;
 }
 
 /** 迭代状态（状态机：planned -> active -> closed）。 */
@@ -71,6 +84,8 @@ export interface Iteration {
 export interface IterationInput {
   title: string;
   objective?: string;
+  start_date?: string | null;
+  end_date?: string | null;
 }
 
 /** 产物类别。 */
@@ -97,6 +112,35 @@ export interface ArtifactInput {
   name: string;
   category: ArtifactCategory;
   description?: string;
+}
+
+/** 产物更新入参（名称/描述/类别/元数据）。 */
+export interface ArtifactUpdateInput {
+  name?: string;
+  description?: string;
+  category?: ArtifactCategory;
+  metadata?: Record<string, unknown> | null;
+}
+
+/** 产物关联类型。 */
+export type LinkType = 'part_of' | 'refers_to' | 'derived_from';
+
+/** 产物关联入参。 */
+export interface ArtifactLinkInput {
+  dst_artifact_id: number;
+  link_type: LinkType;
+}
+
+/** 产物关联。 */
+export interface ArtifactLink {
+  id: number;
+  src_artifact_id: number;
+  dst_artifact_id: number;
+  link_type: LinkType;
+  src_code: string;
+  src_name: string;
+  dst_code: string;
+  dst_name: string;
 }
 
 /** 产物版本。 */
@@ -167,6 +211,7 @@ export interface RuleInput {
   params?: Record<string, unknown> | null;
   severity_default?: Severity;
   description?: string;
+  enabled?: boolean;
 }
 
 /** 规则集。 */
@@ -176,6 +221,23 @@ export interface RuleSet {
   name: string;
   description: string;
   created_at: string;
+}
+
+/** 规则集详情（含成员规则 id）。 */
+export interface RuleSetDetail extends RuleSet {
+  rule_ids: number[];
+}
+
+/** 迭代规则集绑定。 */
+export interface RuleSetBinding {
+  iteration_id: number;
+  rule_set_id: number | null;
+}
+
+/** 已注册检查器。 */
+export interface CheckerInfo {
+  checker_type: string;
+  description: string;
 }
 
 /** 规则集创建入参。 */
@@ -197,6 +259,7 @@ export interface CheckRun {
   summary: CheckSummary | null;
   started_at: string | null;
   finished_at: string | null;
+  task_id: number | null;
 }
 
 /** 检查汇总（后端聚合结构）。 */
@@ -208,7 +271,7 @@ export interface CheckSummary {
   rules: number;
 }
 
-/** 检查发现项。 */
+/** 检查发现项（含规则与产物展示信息）。 */
 export interface Finding {
   id: number;
   check_run_id: number;
@@ -217,6 +280,124 @@ export interface Finding {
   severity: Severity;
   location: string;
   message: string;
+  rule_code: string;
+  rule_name: string;
+  artifact_code: string;
+  artifact_name: string;
+  version_no: number;
+}
+
+/** 仿真作业状态（状态机：pending -> running -> succeeded/failed）。 */
+export type SimJobStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+
+/** 仿真结论（按模板阈值评估）。 */
+export type SimVerdict = 'pass' | 'fail';
+
+/** 求解器输入参数规格。 */
+export interface SolverInputSpec {
+  key: string;
+  label: string;
+  unit: string;
+  default: number | null;
+  required: boolean;
+}
+
+/** 求解器输出指标规格。 */
+export interface SolverMetricSpec {
+  key: string;
+  label: string;
+  unit: string;
+}
+
+/** 已注册求解器清单项。 */
+export interface SolverInfo {
+  solver_type: string;
+  description: string;
+  inputs: SolverInputSpec[];
+  metrics: SolverMetricSpec[];
+}
+
+/** 仿真模板。 */
+export interface SimTemplate {
+  id: number;
+  project_id: number | null;
+  code: string;
+  name: string;
+  solver_type: string;
+  params: Record<string, unknown> | null;
+  thresholds: Record<string, unknown> | null;
+  description: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 仿真模板创建入参。 */
+export interface SimTemplateInput {
+  code: string;
+  name: string;
+  solver_type: string;
+  project_id?: number | null;
+  params?: Record<string, unknown> | null;
+  thresholds?: Record<string, unknown> | null;
+  description?: string;
+  enabled?: boolean;
+}
+
+/** 仿真作业汇总（后端聚合结构）。 */
+export interface SimSummary {
+  metrics: number;
+  failures: number;
+  verdict: SimVerdict;
+}
+
+/** 仿真作业。 */
+export interface SimJob {
+  id: number;
+  iteration_id: number;
+  template_id: number;
+  artifact_version_id: number | null;
+  status: SimJobStatus;
+  inputs: Record<string, unknown> | null;
+  summary: SimSummary | null;
+  error: string | null;
+  created_by: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  task_id: number | null;
+  template_name: string;
+  solver_type: string;
+  artifact_code: string;
+  version_no: number | null;
+}
+
+/** 仿真作业发起入参。 */
+export interface SimJobInput {
+  template_id: number;
+  artifact_version_id?: number | null;
+  inputs?: Record<string, number | string> | null;
+}
+
+/** 仿真结果逐项判定明细。 */
+export interface SimResultDetail {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  min: number | null;
+  max: number | null;
+  passed: boolean;
+}
+
+/** 仿真结果。 */
+export interface SimResult {
+  id: number;
+  sim_job_id: number;
+  metrics: Record<string, number> | null;
+  verdict: SimVerdict;
+  failures: number;
+  detail: SimResultDetail[] | null;
+  created_at: string;
 }
 
 /** 审计日志。 */
@@ -270,4 +451,12 @@ export const ITERATION_STATUS_LABELS: Record<IterationStatus, string> = {
   planned: '已计划',
   active: '进行中',
   closed: '已关闭',
+};
+
+/** 仿真作业状态中文标签映射。 */
+export const SIM_JOB_STATUS_LABELS: Record<SimJobStatus, string> = {
+  pending: '排队中',
+  running: '求解中',
+  succeeded: '已完成',
+  failed: '失败',
 };

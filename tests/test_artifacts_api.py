@@ -106,3 +106,53 @@ def test_artifact_links(client: TestClient, active_iteration: dict[str, Any]) ->
     assert self_link.status_code == 400
     links = client.get(f"/api/v1/artifacts/{a['id']}/links").json()
     assert len(links) == 1
+
+    # 关联列表带出对端产物编码/名称
+    assert links[0]["dst_code"] == "E-2"
+    assert links[0]["dst_name"] == "装配图"
+    # 反向可见（双向查询）
+    assert len(client.get(f"/api/v1/artifacts/{b['id']}/links").json()) == 1
+
+    removed = client.delete(f"/api/v1/artifacts/{a['id']}/links/{links[0]['id']}")
+    assert removed.status_code == 204
+    assert client.get(f"/api/v1/artifacts/{a['id']}/links").json() == []
+    missing = client.delete(f"/api/v1/artifacts/{a['id']}/links/99999")
+    assert missing.status_code == 404
+
+
+def test_artifact_preview(client: TestClient, active_iteration: dict[str, Any]) -> None:
+    it = active_iteration["id"]
+    markdown_artifact = client.post(
+        f"/api/v1/artifacts?iteration_id={it}", json={"code": "F-1", "name": "规范", "category": "spec"}
+    ).json()
+    md_version = client.post(
+        f"/api/v1/artifacts/{markdown_artifact['id']}/versions",
+        files={"file": ("F-1.md", b"# title")},
+        data={"content_type_hint": ""},
+    ).json()
+    preview = client.get(f"/api/v1/versions/{md_version['id']}/preview")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("text/markdown")
+    assert "inline" in preview.headers["content-disposition"]
+
+    # 二进制类型（content_type 由 multipart 推断为 octet-stream 时按扩展名/类型判定）
+    drawing = client.post(
+        f"/api/v1/artifacts?iteration_id={it}", json={"code": "F-2", "name": "图纸", "category": "drawing"}
+    ).json()
+    binary = client.post(
+        f"/api/v1/artifacts/{drawing['id']}/versions", files={"file": ("F-2.bin", b"\x00\x01binary")}
+    ).json()
+    unsupported = client.get(f"/api/v1/versions/{binary['id']}/preview")
+    assert unsupported.status_code == 415
+
+
+def test_artifact_update_category(client: TestClient, active_iteration: dict[str, Any]) -> None:
+    it = active_iteration["id"]
+    artifact = client.post(
+        f"/api/v1/artifacts?iteration_id={it}", json={"code": "G-1", "name": "零件", "category": "drawing"}
+    ).json()
+    updated = client.patch(f"/api/v1/artifacts/{artifact['id']}", json={"category": "model"})
+    assert updated.status_code == 200
+    assert updated.json()["category"] == "model"
+    invalid = client.patch(f"/api/v1/artifacts/{artifact['id']}", json={"category": "unknown"})
+    assert invalid.status_code == 422

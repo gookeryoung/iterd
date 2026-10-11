@@ -52,10 +52,29 @@ class RuleSetOut(BaseModel):
     created_at: datetime
 
 
+class RuleSetDetailOut(RuleSetOut):
+    """规则集详情：含成员规则 id 列表."""
+
+    rule_ids: list[int] = []
+
+
+class RuleSetRuleIn(BaseModel):
+    """规则集成员变更入参."""
+
+    rule_ids: list[int] = []
+
+
 class RuleSetBindIn(BaseModel):
     """规则集绑定入参."""
 
     rule_set_id: int
+
+
+class RuleSetBindingOut(BaseModel):
+    """迭代规则集绑定（未绑定时 rule_set_id 为 null）。"""
+
+    iteration_id: int
+    rule_set_id: int | None
 
 
 class CheckRunIn(BaseModel):
@@ -76,10 +95,11 @@ class CheckRunOut(BaseModel):
     summary: dict[str, Any] | None
     started_at: datetime | None
     finished_at: datetime | None
+    task_id: int | None = None
 
 
 class CheckFindingOut(BaseModel):
-    """发现项对外结构."""
+    """发现项对外结构（规则与产物信息由服务层联表填充）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,3 +110,8 @@ class CheckFindingOut(BaseModel):
     severity: str
     location: str
     message: str
+    rule_code: str = ""
+    rule_name: str = ""
+    artifact_code: str = ""
+    artifact_name: str = ""
+    version_no: int = 0

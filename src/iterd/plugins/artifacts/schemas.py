@@ -24,6 +24,7 @@ class ArtifactUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     description: str | None = None
     metadata: dict[str, Any] | None = None
+    category: str | None = Field(default=None, pattern="^(drawing|model|spec|result)$")
 
 
 class ArtifactOut(BaseModel):
@@ -71,7 +72,7 @@ class ArtifactLinkIn(BaseModel):
 
 
 class ArtifactLinkOut(BaseModel):
-    """关联对外结构."""
+    """关联对外结构（对端产物编码/名称由路由层联表填充）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,3 +80,7 @@ class ArtifactLinkOut(BaseModel):
     src_artifact_id: int
     dst_artifact_id: int
     link_type: str
+    src_code: str = ""
+    src_name: str = ""
+    dst_code: str = ""
+    dst_name: str = ""

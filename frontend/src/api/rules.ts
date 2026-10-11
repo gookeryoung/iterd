@@ -2,12 +2,15 @@
 
 import { api } from './client';
 import type {
+  CheckerInfo,
   CheckRun,
   Finding,
   RuleCategory,
   RuleInput,
   RuleItem,
   RuleSet,
+  RuleSetBinding,
+  RuleSetDetail,
   RuleSetInput,
   Severity,
 } from '../types';
@@ -26,6 +29,18 @@ export async function createRule(data: RuleInput): Promise<RuleItem> {
   return resp.data;
 }
 
+/** 更新规则（含启用/停用与参数）。 */
+export async function updateRule(id: number, data: Partial<RuleInput>): Promise<RuleItem> {
+  const resp = await api.patch<RuleItem>(`/rules/${id}`, data);
+  return resp.data;
+}
+
+/** 已注册检查器清单。 */
+export async function fetchCheckers(): Promise<CheckerInfo[]> {
+  const resp = await api.get<CheckerInfo[]>('/checkers');
+  return resp.data;
+}
+
 /** 规则集列表（可按项目过滤，含全局）。 */
 export async function fetchRuleSets(projectId?: number): Promise<RuleSet[]> {
   const resp = await api.get<RuleSet[]>('/rule-sets', {
@@ -37,6 +52,30 @@ export async function fetchRuleSets(projectId?: number): Promise<RuleSet[]> {
 /** 创建规则集（后端 201）。 */
 export async function createRuleSet(data: RuleSetInput): Promise<RuleSet> {
   const resp = await api.post<RuleSet>('/rule-sets', data);
+  return resp.data;
+}
+
+/** 规则集详情（含成员规则 id）。 */
+export async function fetchRuleSet(id: number): Promise<RuleSetDetail> {
+  const resp = await api.get<RuleSetDetail>(`/rule-sets/${id}`);
+  return resp.data;
+}
+
+/** 向规则集批量添加规则。 */
+export async function addRulesToSet(id: number, ruleIds: number[]): Promise<RuleSetDetail> {
+  const resp = await api.post<RuleSetDetail>(`/rule-sets/${id}/rules`, { rule_ids: ruleIds });
+  return resp.data;
+}
+
+/** 绑定规则集到迭代（后端 201）。 */
+export async function bindRuleSet(ruleSetId: number, iterationId: number): Promise<RuleSet> {
+  const resp = await api.post<RuleSet>(`/rule-sets/${ruleSetId}/bind`, { iteration_id: iterationId });
+  return resp.data;
+}
+
+/** 查询迭代已绑定的规则集。 */
+export async function fetchRuleSetBinding(iterationId: number): Promise<RuleSetBinding> {
+  const resp = await api.get<RuleSetBinding>(`/iterations/${iterationId}/rule-set-binding`);
   return resp.data;
 }
 

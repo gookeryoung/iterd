@@ -102,10 +102,18 @@ def test_full_check_flow(client: TestClient, scenario: dict[str, Any]) -> None:
     missing_task = client.get("/api/v1/tasks/99999")
     assert missing_task.status_code == 404
 
-    # WebSocket 推送终态（任务已完成时首条即终态，随后服务端关闭连接）
+    # WebSocket 推送终态：连接后先发送 JWT 首帧鉴权（任务已完成时首条即终态）
+    token = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
     with client.websocket_connect(f"/api/v1/ws/tasks/{tasks[0]['id']}") as ws:
+        ws.send_json({"token": token})
         message = ws.receive_json()
         assert message["status"] in ("running", "succeeded")
+
+    # 未鉴权连接被拒（1008）
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect(f"/api/v1/ws/tasks/{tasks[0]['id']}") as unauth:
+        unauth.receive_json()
 
     # 溯源图：产物版本向下可查到 check_finding 节点
     version_id = client.get(f"/api/v1/artifacts/{scenario['bad']['id']}/versions").json()[0]["id"]
@@ -139,3 +147,50 @@ def test_full_check_flow(client: TestClient, scenario: dict[str, Any]) -> None:
 def test_check_run_not_found(client: TestClient, scenario: dict[str, Any]) -> None:
     assert client.get("/api/v1/check-runs/99999").status_code == 404
     assert client.get("/api/v1/check-runs/99999/findings").status_code == 404
+
+
+def test_checkers_manifest(client: TestClient) -> None:
+    checkers = client.get("/api/v1/checkers").json()
+    types = {item["checker_type"] for item in checkers}
+    assert {"filename_convention", "metadata_required"} <= types
+
+
+def test_rule_set_detail_and_binding(client: TestClient, scenario: dict[str, Any]) -> None:
+    rule_set_id = _prepare_rules(client, scenario)
+    it_id = scenario["iteration"]["id"]
+
+    detail = client.get(f"/api/v1/rule-sets/{rule_set_id}").json()
+    assert len(detail["rule_ids"]) == 2
+
+    extra = client.post(
+        "/api/v1/rules",
+        json={"code": "EX-1", "name": "附加规则", "category": "process", "checker_type": "metadata_required"},
+    ).json()
+    added = client.post(f"/api/v1/rule-sets/{rule_set_id}/rules", json={"rule_ids": [extra["id"]]}).json()
+    assert len(added["rule_ids"]) == 3
+
+    binding = client.get(f"/api/v1/iterations/{it_id}/rule-set-binding").json()
+    assert binding["rule_set_id"] == rule_set_id
+    assert client.get("/api/v1/iterations/99999/rule-set-binding").status_code == 404
+
+
+def test_findings_enriched_and_task_id(client: TestClient, scenario: dict[str, Any]) -> None:
+    rule_set_id = _prepare_rules(client, scenario)
+    it_id = scenario["iteration"]["id"]
+    created = client.post(f"/api/v1/iterations/{it_id}/check-runs", json={"rule_set_id": rule_set_id})
+    run_id = created.json()["id"]
+    assert created.json()["task_id"] is not None
+
+    import time
+
+    for _ in range(50):
+        state = client.get(f"/api/v1/check-runs/{run_id}").json()
+        if state["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.2)
+
+    findings = client.get(f"/api/v1/check-runs/{run_id}/findings").json()
+    assert findings
+    first = findings[0]
+    assert first["rule_code"] and first["artifact_code"] and first["version_no"] == 1
+    assert first["artifact_name"]
