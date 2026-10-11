@@ -61,6 +61,15 @@ def _which_none(_cmd: str) -> str | None:
     return None
 
 
+def _port_checker(occupied: set[int]) -> Callable[[str, int], bool]:
+    """端口探测替身工厂：occupied 中的端口视为被占用，其余视为空闲."""
+
+    def _check(_host: str, port: int) -> bool:
+        return port in occupied
+
+    return _check
+
+
 def _which_ok(cmd: str) -> str | None:
     """shutil.which 替身：仅 pnpm 视为已安装，模拟 CI 无 pnpm 以外的正常环境."""
     return "/usr/bin/pnpm" if cmd == "pnpm" else None
@@ -152,8 +161,9 @@ def test_build_missing_artifact(fake_frontend: Path, tmp_path: Path, monkeypatch
 
 
 def test_dev_starts_both_servers(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
-    """dev 模式应同时启动 uvicorn --reload 后端与 pnpm dev 前端，并打印访问地址."""
+    """dev 模式应同时启动 uvicorn --reload 后端与 pnpm dev --port 前端，并打印访问地址."""
     monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker(set()))
     _patch_popen(monkeypatch)
     _FakeProc.wait_results = [KeyboardInterrupt()]
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
@@ -165,7 +175,7 @@ def test_dev_starts_both_servers(fake_frontend: Path, monkeypatch: pytest.Monkey
     assert len(_FakeProc.instances) == 2
     backend_cmd = _FakeProc.instances[0].cmd
     assert "uvicorn" in backend_cmd and "--reload" in backend_cmd and "8000" in backend_cmd
-    assert _FakeProc.instances[1].cmd == ["pnpm", "dev"]
+    assert _FakeProc.instances[1].cmd == ["pnpm", "dev", "--port", "5173"]
     assert _FakeProc.instances[1].cwd == fake_frontend
     out = capsys.readouterr().out
     assert "http://127.0.0.1:5173" in out and "8000" in out
@@ -173,9 +183,56 @@ def test_dev_starts_both_servers(fake_frontend: Path, monkeypatch: pytest.Monkey
     assert all(p.terminated for p in _FakeProc.instances)
 
 
+def test_dev_frontend_port_auto_increments(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    """前端默认端口被占用时应自动顺延，并将顺延端口显式传给 vite 与打印地址一致."""
+    monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker({5173}))
+    _patch_popen(monkeypatch)
+    _FakeProc.wait_results = [KeyboardInterrupt()]
+    monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
+    monkeypatch.setattr(cli.signal, "signal", _noop_signal)
+
+    with pytest.raises(SystemExit):
+        cli.cmd_dev("127.0.0.1", None)
+
+    assert _FakeProc.instances[1].cmd == ["pnpm", "dev", "--port", "5174"]
+    assert "http://127.0.0.1:5174" in capsys.readouterr().out
+
+
+def test_dev_backend_port_occupied_aborts(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    """后端端口被占用时应立即报错退出且不启动任何子进程."""
+    monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker({8000}))
+    _patch_popen(monkeypatch)
+    monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
+
+    with pytest.raises(SystemExit, match="1"):
+        cli.cmd_dev("127.0.0.1", None)
+
+    assert _FakeProc.instances == []
+    assert "已被占用" in capsys.readouterr().err
+
+
+def test_dev_backend_exit_failure_reports(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    """后端非零退出时应输出原因提示并以同码退出，同时回收前端进程."""
+    monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker(set()))
+    _patch_popen(monkeypatch)
+    _FakeProc.wait_results = [3]
+    monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
+    monkeypatch.setattr(cli.signal, "signal", _noop_signal)
+
+    with pytest.raises(SystemExit, match="3"):
+        cli.cmd_dev("127.0.0.1", None)
+
+    assert "后端进程异常退出" in capsys.readouterr().err
+    assert all(p.terminated for p in _FakeProc.instances)
+
+
 def test_dev_installs_deps_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """node_modules 缺失时应先执行 pnpm install 再启动服务."""
     monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker(set()))
     frontend = tmp_path / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text("{}", encoding="utf-8")
@@ -209,6 +266,7 @@ def test_dev_install_failure_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_dev_port_mismatch_warns(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     """后端端口与 Vite 代理目标（8000）不一致时应输出警告."""
     monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker(set()))
     _patch_popen(monkeypatch)
     _FakeProc.wait_results = [KeyboardInterrupt()]
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
@@ -223,6 +281,7 @@ def test_dev_port_mismatch_warns(fake_frontend: Path, monkeypatch: pytest.Monkey
 def test_dev_sigint_handler_cleans_up(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """注册的 SIGINT 处理器应终止全部子进程并退出；后端正常退出时 dev 静默返回."""
     monkeypatch.setattr("shutil.which", _which_ok)
+    monkeypatch.setattr(cli, "_port_in_use", _port_checker(set()))
     _patch_popen(monkeypatch)
     _FakeProc.wait_results = [0]
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)

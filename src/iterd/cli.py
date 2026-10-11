@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import signal
+import socket
 import subprocess  # nosec B404 - dev/build 需管理前后端子进程，命令均来自内部常量
 import sys
 from contextlib import suppress
@@ -15,6 +16,10 @@ from typing import Any
 
 # 后端默认端口：须与 frontend/vite.config.ts 的 /api、/ws 代理目标一致
 DEV_DEFAULT_PORT = 8000
+# 前端默认端口：与 frontend/vite.config.ts 的 server.port 一致
+FRONTEND_DEFAULT_PORT = 5173
+# 前端端口顺延探测上限（5173 起连续尝试的端口数）
+FRONTEND_PORT_ATTEMPTS = 20
 
 
 def _frontend_dir() -> Path | None:
@@ -39,6 +44,25 @@ def _ensure_dev_env(frontend: Path | None) -> None:
     if shutil.which("pnpm") is None:
         print("[error] pnpm 未安装，请先安装 pnpm（https://pnpm.io/installation）", file=sys.stderr)
         raise SystemExit(1)
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """探测 host:port 是否已被占用（以能否成功绑定为准）."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
+def _find_free_port(host: str, start: int, attempts: int = FRONTEND_PORT_ATTEMPTS) -> int | None:
+    """从 start 起顺延探测第一个可用端口；连续 attempts 个均被占用返回 None."""
+    for port in range(start, start + attempts):
+        if not _port_in_use(host, port):
+            return port
+    return None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -116,7 +140,9 @@ def cmd_dev(host: str, port: int | None) -> None:
     """开发模式：同时启动后端 uvicorn --reload 与前端 vite dev server（对标 cndb dev）.
 
     后端端口默认 8000 与 frontend/vite.config.ts 的 /api、/ws 代理目标对齐；
-    前端由 Vite 提供热更新与接口代理，本地调试访问前端地址即可。
+    前端端口从 5173 起探测，被占用时自动顺延并以 --port 显式传给 vite，
+    保证实际端口与打印地址一致。启动前先探测后端端口，被占用即报错退出，
+    避免后端静默失败后连带终止前端的误导性日志。
     Ctrl+C 信号统一清理全部子进程后退出。
     """
     frontend = _frontend_dir()
@@ -131,13 +157,27 @@ def cmd_dev(host: str, port: int | None) -> None:
             raise SystemExit(result.returncode)
 
     backend_port = port or DEV_DEFAULT_PORT
+    if _port_in_use(host, backend_port):
+        print(
+            f"[error] 后端端口 {host}:{backend_port} 已被占用（可能有残留的 dev 进程），"
+            f"请先释放该端口或使用 --port 指定其他端口",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     if backend_port != DEV_DEFAULT_PORT:
         print(
             f"[warn] 后端端口 {backend_port} 与 Vite 代理目标（{DEV_DEFAULT_PORT}）不一致，"
             "前端 /api 请求将无法代理，请调整 frontend/vite.config.ts 或改用默认端口",
             file=sys.stderr,
         )
-    frontend_port = 5173
+    frontend_port = _find_free_port(host, FRONTEND_DEFAULT_PORT)
+    if frontend_port is None:
+        print(
+            f"[error] 前端端口 {FRONTEND_DEFAULT_PORT}-{FRONTEND_DEFAULT_PORT + FRONTEND_PORT_ATTEMPTS - 1} 均被占用，"
+            "无法启动前端开发服务器",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     processes: list[subprocess.Popen[Any]] = []
 
@@ -186,7 +226,10 @@ def cmd_dev(host: str, port: int | None) -> None:
     processes.append(backend)
 
     print(f"[dev] 启动前端开发服务器（http://{host}:{frontend_port}，vite 热更新）...")
-    frontend_proc = subprocess.Popen(["pnpm", "dev"], cwd=frontend, start_new_session=True)  # nosec - 命令来自内部常量
+    # 显式传 --port：探测到的端口优先于 vite.config.ts 固定值，避免顺延后与打印地址不一致
+    frontend_proc = subprocess.Popen(  # nosec - 命令来自内部常量
+        ["pnpm", "dev", "--port", str(frontend_port)], cwd=frontend, start_new_session=True
+    )
     processes.append(frontend_proc)
 
     print()
@@ -196,12 +239,19 @@ def cmd_dev(host: str, port: int | None) -> None:
     print("按 Ctrl+C 停止所有服务")
 
     try:
-        backend.wait()
+        exit_code = backend.wait()
     except KeyboardInterrupt:
         raise SystemExit(0) from None
     finally:
         # 后端退出或异常时统一回收前端进程（幂等）
         _terminate_all()
+    if exit_code != 0:
+        print(
+            f"[error] 后端进程异常退出（退出码 {exit_code}），前端已一并停止；"
+            "请查看上方日志定位原因（常见：端口被占用、依赖缺失、代码报错）",
+            file=sys.stderr,
+        )
+        raise SystemExit(exit_code)
 
 
 def cmd_worker(worker_id: str | None) -> None:
