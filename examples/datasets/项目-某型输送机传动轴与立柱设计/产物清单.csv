@@ -1,0 +1,9 @@
+产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
+DRW-300,传动系统总图,drawing,AXLE-2026,1,DRW-300_revA.dxf,迭代1归档产物（基线快照对象，不参与迭代2检查）
+SHF-301,传动轴三维模型,model,AXLE-2026,2,SHF-301_revA.step,合规数据；SHAFT 系列仿真绑定对象
+COL-301,中间立柱三维模型,model,AXLE-2026,2,COL-301_revA.step,合规数据；COL 系列仿真绑定对象
+CAL-301,传动轴扭转计算书,result,AXLE-2026,2,CAL-301_revA.csv,合规数据
+CAL-302,立柱稳定性计算书,result,AXLE-2026,2,CAL-302_revA.csv,重量kg 误登记为 3200 超出上限（触发 RANGE-301 error）
+SPC-301,传动系统技术要求,spec,AXLE-2026,2,SPC-301_revA.md,缺校核者会签（触发 PROC-301 info）
+exc-303,立柱联接件草图,drawing,AXLE-2026,2,exc-303_revA.dxf,小写编码且文件名小写开头（同时触发 CODE-301 与 NAME-301 error，演示规则独立性）
+EXC-302,现场勘察数据包,result,AXLE-2026,2,EXC-302_revA.zip,压缩包格式不在白名单（触发 EXT-301 warning）

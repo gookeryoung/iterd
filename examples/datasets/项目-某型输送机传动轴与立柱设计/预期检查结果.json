@@ -1,0 +1,79 @@
+{
+  "_comment": "示例数据自检基线：载入本数据集后对「迭代 2」执行「传动系统设计规范」规则集检查，CheckRun.summary 应与 expected_summary 一致；仿真作业按 expected_simulations 发起（模板 + 绑定产物），verdict 与 failed_keys 用于核对结果页展示。编码规范 / 数值范围 / 扩展名白名单三类新检查器的发现项全部来自本数据集设计数据。",
+  "iteration": { "project_code": "AXLE-2026", "number": 2 },
+  "rule_set": "传动系统设计规范",
+  "expected_summary": {
+    "error": 3,
+    "warning": 1,
+    "info": 1,
+    "artifacts": 7,
+    "rules": 6
+  },
+  "expected_findings": [
+    {
+      "rule_code": "NAME-301",
+      "severity": "error",
+      "artifact_code": "exc-303",
+      "location": "exc-303_revA.dxf",
+      "message_contains": "文件名 exc-303_revA.dxf 不符合规范"
+    },
+    {
+      "rule_code": "CODE-301",
+      "severity": "error",
+      "artifact_code": "exc-303",
+      "location": "exc-303",
+      "message_contains": "产物编码 exc-303 不符合规范"
+    },
+    {
+      "rule_code": "RANGE-301",
+      "severity": "error",
+      "artifact_code": "CAL-302",
+      "location": "metadata",
+      "message_contains": "元数据 重量kg 超出上限 500"
+    },
+    {
+      "rule_code": "EXT-301",
+      "severity": "warning",
+      "artifact_code": "EXC-302",
+      "location": "EXC-302_revA.zip",
+      "message_contains": "文件扩展名 .zip 不在允许清单"
+    },
+    {
+      "rule_code": "PROC-301",
+      "severity": "info",
+      "artifact_code": "SPC-301",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据: 校核者"
+    }
+  ],
+  "expected_simulations": [
+    {
+      "template_code": "SHAFT-NOMINAL-CHECK",
+      "bind_artifact_code": "SHF-301",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "max_shear_stress": 44.7118, "twist_angle": "≈0.7206", "safety_factor": "≈1.3419" }
+    },
+    {
+      "template_code": "SHAFT-OVERLOAD-CHECK",
+      "bind_artifact_code": "SHF-301",
+      "verdict": "fail",
+      "failed_keys": ["max_shear_stress", "twist_angle", "safety_factor"],
+      "metrics_hint": { "max_shear_stress": 83.8347, "twist_angle": "≈1.3512", "safety_factor": "≈0.7157" }
+    },
+    {
+      "template_code": "COL-STABILITY-CHECK",
+      "bind_artifact_code": "COL-301",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "critical_load": 975906.4832, "actual_stress": 13.8889, "safety_factor": "≈19.5181" }
+    },
+    {
+      "template_code": "COL-SLENDER-CHECK",
+      "bind_artifact_code": "COL-301",
+      "verdict": "fail",
+      "failed_keys": ["safety_factor"],
+      "metrics_hint": { "critical_load": 27108.5134, "actual_stress": 18.75, "safety_factor": "≈0.9036" }
+    }
+  ]
+}

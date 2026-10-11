@@ -1,0 +1,14 @@
+场景编号,类别,数据特征,涉及对象,预期表现
+BND-01,编码规范,小写产物编码（rnd-402）,rnd-402,BND-CODE-401 报 error 不符合规范
+BND-02,编码规范,缺连字符产物编码（RND403 无-分隔）,RND403,BND-CODE-401 报 error 不符合规范
+BND-03,数值范围,重量恰好等于上限（重量kg=500=max）,RND-401,BND-RANGE-401 判定通过（边界值含在范围内）
+BND-04,数值范围,重量恰好等于下限（重量kg=0.1=min）,RND-404,BND-RANGE-401 判定通过（边界值含在范围内）
+BND-05,数值范围,数值字段填入中文文本（重量kg=约4.2）,CAL-401,BND-RANGE-401 报 error 应为数值
+BND-06,扩展名,大写扩展名（RND-404_revA.STEP）,RND-404,BND-EXT-401 大小写不敏感判定通过
+BND-07,扩展名,非白名单扩展名（.rar）,RND-405,BND-EXT-401 报 warning 不在允许清单
+BND-08,规则状态,规则集纳入 enabled=false 的停用规则,BND-NAME-404,检查跳过该规则且不计入 summary.rules
+BND-09,规则状态,未注册 checker_type 的停用规则（no_such_checker）,BND-CHK-405,载入成功且检查跳过（依赖前提：create_rule 不校验 checker_type 且执行时按 enabled 过滤；若后续版本增加创建校验该样本将 422）
+BND-10,迭代状态,planned 状态迭代（批量生产准备）,BND-2026 迭代2,载入后保持 planned 状态不被推进
+BND-11,仿真,正常对照组全指标满足阈值,BND-SHAFT-PASS-CHECK,结论 pass
+BND-12,仿真,扭矩参数为 0（非正数）,BND-SHAFT-EDGE-CHECK,求解器抛参数校验错误（求解参数 torque 必须为正数），作业 status=failed
+BND-13,仿真,计算长度系数 μ=2.0（一端固定一端自由，临界力折减 4 倍）,BND-COL-EDGE-CHECK,仅稳定安全系数超阈，结论 fail 且 failed_keys 仅含 safety_factor

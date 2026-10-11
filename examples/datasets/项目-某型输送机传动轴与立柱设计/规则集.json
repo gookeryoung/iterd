@@ -1,0 +1,14 @@
+{
+  "_comment": "规则集与迭代绑定种子数据。project_code 为 null 表示全局规则集；rule_codes 引用 规则库.json 中的 code。",
+  "rule_sets": [
+    {
+      "name": "传动系统设计规范",
+      "project_code": "AXLE-2026",
+      "description": "覆盖命名、编码、重量范围、格式白名单、材料与工艺会签六类检查",
+      "rule_codes": ["NAME-301", "CODE-301", "RANGE-301", "EXT-301", "MATL-301", "PROC-301"]
+    }
+  ],
+  "bindings": [
+    { "project_code": "AXLE-2026", "iteration_number": 2, "rule_set_name": "传动系统设计规范" }
+  ]
+}

@@ -1,0 +1,26 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('传动轴三维模型（编码与参数边界基准数据）'),'2;1');
+FILE_NAME('RND-401_revA.step','2026-09-25T09:30:00',('张伟'),('某机械设计院'),'iterd','iterd 0.1.0','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 -1 1 5 4 }'));
+ENDSEC;
+DATA;
+/* 坐标系 */
+#1 = CARTESIAN_POINT('原点',(0.0,0.0,0.0));
+#2 = DIRECTION('X轴',(1.0,0.0,0.0));
+#3 = DIRECTION('Y轴',(0.0,1.0,0.0));
+#4 = DIRECTION('Z轴',(0.0,0.0,1.0));
+#5 = AXIS2_PLACEMENT_3D('世界坐标系',#1,#4,#2);
+/* 传动轴 SHAFT-01：Φ45 L=1250，45钢调质 */
+#10 = CARTESIAN_POINT('轴段起点',(0.0,0.0,0.0));
+#11 = DIRECTION('轴向',(1.0,0.0,0.0));
+#12 = ADVANCED_BREP_SHAPE_REPRESENTATION('传动轴',(#10,#11),#5);
+#13 = SHAPE_DEFINITION_REPRESENTATION('SHAFT-01','传动轴 Φ45 L=1250',#12);
+#14 = PRODUCT('SHAFT-01','传动轴','45钢',(#13));
+/* 键槽：A 型平键 14x9x70 */
+#20 = CARTESIAN_POINT('键槽基准',(600.0,22.5,0.0));
+#21 = ADVANCED_BREP_SHAPE_REPRESENTATION('键槽',(#20,#11),#5);
+#22 = SHAPE_DEFINITION_REPRESENTATION('KEY-01','平键槽 14x9x70',#21);
+#23 = PRODUCT('KEY-01','A型平键槽','45钢',(#22));
+ENDSEC;
+END-ISO-10303-21;

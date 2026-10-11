@@ -8,20 +8,24 @@ from typing import Any
 import pytest
 
 from iterd.checkers import (
+    ArtifactCodeConventionChecker,
     ArtifactRef,
+    FileExtensionWhitelistChecker,
     FilenameConventionChecker,
+    MetadataRangeChecker,
     MetadataRequiredChecker,
     RuleRef,
+    checker_manifest,
     get_checker,
     registered_checkers,
 )
 from iterd.core.errors import IterdError
 
 
-def _artifact(filename: str, metadata: dict[str, Any] | None = None) -> ArtifactRef:
+def _artifact(filename: str, metadata: dict[str, Any] | None = None, code: str = "X") -> ArtifactRef:
     return ArtifactRef(
         artifact_id=1,
-        artifact_code="X",
+        artifact_code=code,
         artifact_name="X",
         version_id=1,
         version_no=1,
@@ -56,8 +60,80 @@ def test_metadata_required() -> None:
     assert checker.check(_artifact("a.dwg", {"材料": "钢", "重量": 1.5}), [rule]) == []
 
 
+def test_artifact_code_convention() -> None:
+    checker = ArtifactCodeConventionChecker()
+    assert checker.supported_extensions() == ()
+    rule = _rule("artifact_code_convention", {"pattern": r"^[A-Z]{3}-\d{3,}$"})
+    assert checker.check(_artifact("a.dxf", code="SHF-301"), [rule]) == []
+    bad = checker.check(_artifact("a.dxf", code="shf-301"), [rule])
+    assert len(bad) == 1 and bad[0].severity == "error"
+    assert bad[0].location == "shf-301"
+    assert "产物编码 shf-301 不符合规范" in bad[0].message
+    # 空 pattern 放行（缺配置即跳过）
+    assert checker.check(_artifact("a.dxf", code="x"), [_rule("artifact_code_convention", {})]) == []
+
+
+def test_metadata_range() -> None:
+    checker = MetadataRangeChecker()
+    rule = _rule("metadata_range", {"ranges": {"重量kg": {"min": 0.1, "max": 500}}})
+    # 范围内（含恰好等于上下限边界值）通过
+    assert checker.check(_artifact("a.csv", {"重量kg": 500}), [rule]) == []
+    assert checker.check(_artifact("a.csv", {"重量kg": 0.1}), [rule]) == []
+    over = checker.check(_artifact("a.csv", {"重量kg": 3200}), [rule])
+    assert len(over) == 1 and over[0].location == "metadata"
+    assert "元数据 重量kg 超出上限 500" in over[0].message
+    under = checker.check(_artifact("a.csv", {"重量kg": 0.05}), [rule])
+    assert "元数据 重量kg 低于下限 0.1" in under[0].message
+    # 非数值（字符串与 bool 均算类型问题，bool 不参与范围比较）
+    assert "元数据 重量kg 应为数值" in checker.check(_artifact("a.csv", {"重量kg": "约4.2"}), [rule])[0].message
+    assert "元数据 重量kg 应为数值" in checker.check(_artifact("a.csv", {"重量kg": True}), [rule])[0].message
+    # 缺失键不报（必填职责归 metadata_required）
+    assert checker.check(_artifact("a.csv"), [rule]) == []
+    # 多键问题聚合一条发现项
+    two = checker.check(
+        _artifact("a.csv", {"重量kg": 3200, "壁厚mm": "薄"}),
+        [_rule("metadata_range", {"ranges": {"重量kg": {"max": 500}, "壁厚mm": {"min": 1}}})],
+    )
+    assert len(two) == 1 and "; " in two[0].message
+    # 非法边界配置（非 dict 规格 / 非数值边界 / bool 边界）视为该侧不约束
+    lax = _rule("metadata_range", {"ranges": {"重量kg": 5, "壁厚mm": {"min": True, "max": "厚"}}})
+    assert checker.check(_artifact("a.csv", {"重量kg": 3200, "壁厚mm": 0.01}), [lax]) == []
+
+
+def test_file_extension_whitelist() -> None:
+    checker = FileExtensionWhitelistChecker()
+    rule = _rule("file_extension_whitelist", {"extensions": [".dxf", ".dwg", ".step", ".csv", ".md"]})
+    assert checker.supported_extensions() == ()
+    assert checker.check(_artifact("SHF-301_revA.step"), [rule]) == []
+    # 扩展名大小写不敏感（文件名与清单两侧均不敏感）
+    assert checker.check(_artifact("RND-404_revA.STEP"), [rule]) == []
+    assert (
+        checker.check(_artifact("RND-404_revA.step"), [_rule("file_extension_whitelist", {"extensions": [".STEP"]})])
+        == []
+    )
+    bad = checker.check(_artifact("EXC-302_revA.zip"), [rule])
+    assert len(bad) == 1 and bad[0].severity == "error"
+    assert bad[0].location == "EXC-302_revA.zip"
+    assert "文件扩展名 .zip 不在允许清单" in bad[0].message
+    # 无扩展名文件
+    none = checker.check(_artifact("README"), [rule])
+    assert len(none) == 1 and "文件扩展名 (无) 不在允许清单" in none[0].message
+    # 空清单放行（缺配置即跳过）
+    assert checker.check(_artifact("a.rar"), [_rule("file_extension_whitelist", {})]) == []
+
+
 def test_registry() -> None:
     assert set(registered_checkers()) >= {"filename_convention", "metadata_required"}
+    assert set(registered_checkers()) == {
+        "filename_convention",
+        "artifact_code_convention",
+        "file_extension_whitelist",
+        "metadata_required",
+        "metadata_range",
+    }
+    manifest = checker_manifest()
+    assert {item["checker_type"] for item in manifest} == set(registered_checkers())
+    assert all(item["description"] for item in manifest)
     assert get_checker("filename_convention") is not None
     with pytest.raises(IterdError) as exc:
         get_checker("nope")
