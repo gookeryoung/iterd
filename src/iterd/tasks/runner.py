@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -23,6 +24,14 @@ logger = logging.getLogger("iterd.worker")
 
 POLL_INTERVAL = 1.0
 HEARTBEAT_INTERVAL = 10.0
+
+
+@dataclass(frozen=True)
+class InAppWorker:
+    """进程内 worker 句柄：后台任务 + 协作停止事件（lifespan shutdown 用）."""
+
+    task: asyncio.Task[None]
+    stop: asyncio.Event
 
 
 class _LiveContext:
@@ -174,16 +183,30 @@ async def run_one_shot(session: AsyncSession, task: Task, worker_id: str) -> Non
     await execute_task(session, task, worker_id)
 
 
-async def start_in_app_worker() -> asyncio.Task[None]:
-    """在 API 进程内启动后台 worker（task_worker_in_app=True 时由 lifespan 调用）。"""
-    return asyncio.create_task(worker_loop("in-app"))
+async def start_in_app_worker() -> InAppWorker:
+    """在 API 进程内启动后台 worker（task_worker_in_app=True 时由 lifespan 调用）."""
+    stop = asyncio.Event()
+    return InAppWorker(task=asyncio.create_task(worker_loop("in-app", stop=stop)), stop=stop)
 
 
-async def stop_in_app_worker(worker_task: asyncio.Task[None]) -> None:
-    """优雅停止进程内 worker."""
-    worker_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await worker_task
+async def stop_in_app_worker(worker: InAppWorker, timeout: float = 5.0) -> None:
+    """优雅停止进程内 worker：先协作式停止，超时再取消；关闭阶段 DB 异常降级为告警.
+
+    shutdown 时 SQLite 可能因锁冲突/连接释放顺序等偶发写失败，该异常不应
+    从 lifespan 冒泡导致 "Application shutdown failed"，仅记录告警。
+    """
+    worker.stop.set()
+    try:
+        await asyncio.wait_for(asyncio.shield(worker.task), timeout)
+    except TimeoutError:
+        # worker 仍在执行任务（stop 仅在循环顶部检查），超时后强制取消
+        worker.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker.task
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("进程内 worker 关闭异常，已忽略", exc_info=True)
 
 
 def utcnow() -> datetime:

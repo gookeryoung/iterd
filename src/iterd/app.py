@@ -44,11 +44,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await ensure_admin(session, settings.admin_username, settings.admin_password)
         await session.commit()
 
-    worker_task = None
+    worker = None
     if settings.task_worker_in_app:
         from iterd.tasks import runner
 
-        worker_task = await runner.start_in_app_worker()
+        worker = await runner.start_in_app_worker()
 
     if settings.backup_interval_hours > 0:
         from iterd.core.backup import BackupError, auto_backup_if_due
@@ -60,10 +60,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("iterd 启动完成 database=%s", settings.database_url)
     yield
-    if worker_task is not None:
+    if worker is not None:
         from iterd.tasks import runner
 
-        await runner.stop_in_app_worker(worker_task)
+        await runner.stop_in_app_worker(worker)
     await engine.dispose()
 
 

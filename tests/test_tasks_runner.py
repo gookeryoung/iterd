@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -182,6 +183,53 @@ def test_worker_loop_processes_and_stops(isolated_db: None) -> None:
                     break
         stop.set()
         await asyncio.wait_for(loop, timeout=5)
+
+    asyncio.run(_run())
+
+
+def test_in_app_worker_graceful_stop(isolated_db: None) -> None:
+    """进程内 worker：协作式停止应正常退出且无异常冒出."""
+    import logging
+
+    async def _run() -> None:
+        worker = await runner.start_in_app_worker()
+        await runner.stop_in_app_worker(worker, timeout=5)
+        assert worker.task.done() and not worker.task.cancelled()
+        assert worker.task.exception() is None
+
+    logging.getLogger("iterd.worker").setLevel(logging.CRITICAL)
+    asyncio.run(_run())
+
+
+def test_in_app_worker_crash_swallowed(isolated_db: None, caplog: Any) -> None:
+    """worker 关闭阶段异常应降级为告警，不从 lifespan 冒泡."""
+    import logging
+
+    async def _run() -> None:
+        async def _boom() -> None:
+            raise RuntimeError("db readonly 模拟")
+
+        task = asyncio.create_task(_boom())
+        worker = runner.InAppWorker(task=task, stop=asyncio.Event())
+        await asyncio.sleep(0)  # 让异常在 task 中落地
+        with caplog.at_level(logging.WARNING, logger="iterd.worker"):
+            await runner.stop_in_app_worker(worker, timeout=5)
+        assert any("关闭异常" in r.message for r in caplog.records)
+
+    asyncio.run(_run())
+
+
+def test_in_app_worker_timeout_cancels(isolated_db: None) -> None:
+    """worker 无视 stop 事件时，超时后应强制取消且不抛异常."""
+
+    async def _run() -> None:
+        async def _stubborn() -> None:
+            await asyncio.sleep(60)
+
+        task = asyncio.create_task(_stubborn())
+        worker = runner.InAppWorker(task=task, stop=asyncio.Event())
+        await runner.stop_in_app_worker(worker, timeout=0.1)
+        assert task.cancelled()
 
     asyncio.run(_run())
 
