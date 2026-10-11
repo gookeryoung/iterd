@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -80,3 +83,43 @@ def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
         engine.dispose()
     assert version == "0002"
     assert "role" in columns
+
+
+def test_load_example_db_is_versioned_and_serve_ready(tmp_path: Path) -> None:
+    """载入脚本建库走 alembic（E2E 回归）：库带版本号，serve 启动迁移幂等.
+
+    修复前 create_all 建出"当前结构但无 alembic_version"的库，
+    serve 启动 stamp 0001 后升级 0002，因 users.role 列已存在而崩溃。
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'example' / 'iterd.db'}"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ITERD_")}
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "load_example.py"),
+            "--data-dir",
+            str(tmp_path / "example"),
+            "--database-url",
+            db_url,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=repo_root,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    # 载入产物库已版本化到当前 head
+    engine = sa.create_engine(to_sync_url(db_url))
+    try:
+        with engine.connect() as conn:
+            version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
+    finally:
+        engine.dispose()
+    assert version == "0002"
+
+    # serve 启动路径（lifespan 自动迁移）在该库上幂等无异常
+    upgrade_head(db_url)

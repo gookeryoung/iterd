@@ -400,7 +400,7 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     """主载入流程。"""
     from iterd.core.config import get_settings
     from iterd.core.database import get_engine, get_session_factory
-    from iterd.models import Base
+    from iterd.core.migrations import upgrade_head
 
     # 触发全部模型注册（含 simulation 与 tasks）
     from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace  # noqa: F401
@@ -410,9 +410,10 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     from iterd.tasks import runner
 
     settings = get_settings()
+    # 建库走 alembic 迁移（带 alembic_version），与 serve/seed/worker 一致；
+    # create_all 会建出"当前结构但未版本化"的库，serve 启动 stamp 基线后重复加列报错
+    upgrade_head(settings.database_url)
     engine = get_engine(settings.database_url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     factory = get_session_factory(engine)
     print(f"数据库: {settings.database_url}")
 
