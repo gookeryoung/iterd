@@ -14,7 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from iterd.models import Base, TimestampMixin, UidMixin
 
-CATEGORIES = ("drawing", "model", "spec", "result")
+CATEGORIES = ("drawing", "model", "spec", "manual", "result")
 LINK_TYPES = ("part_of", "refers_to", "derived_from")
 
 

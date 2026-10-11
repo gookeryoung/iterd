@@ -3,6 +3,7 @@
 import { api } from './client';
 import type {
   IterationSubmission,
+  ProjectRunItem,
   SubmissionInput,
   WorkflowRun,
   WorkflowTemplate,
@@ -79,6 +80,12 @@ export async function createWorkflowRun(
 /** 迭代下运行列表（含作业概要与任务 id）。 */
 export async function fetchWorkflowRuns(iterationId: number): Promise<WorkflowRun[]> {
   const resp = await api.get<WorkflowRun[]>(`/iterations/${iterationId}/workflow-runs`);
+  return resp.data;
+}
+
+/** 项目级运行列表（跨迭代汇总，按 id 倒序）。 */
+export async function fetchProjectRuns(projectId: number): Promise<ProjectRunItem[]> {
+  const resp = await api.get<ProjectRunItem[]>(`/projects/${projectId}/workflow-runs`);
   return resp.data;
 }
 

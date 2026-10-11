@@ -406,6 +406,37 @@ async def list_runs(session: AsyncSession, *, iteration_id: int) -> list[Workflo
     )
 
 
+async def list_project_runs(session: AsyncSession, *, project_id: int) -> list[dict[str, Any]]:
+    """项目级运行列表（跨迭代汇总，join 迭代序号与标题，按 id 倒序）。"""
+    from iterd.plugins.projects.models import Iteration
+
+    rows = (
+        await session.execute(
+            select(WorkflowRun, Iteration.number, Iteration.title)
+            .join(Iteration, WorkflowRun.iteration_id == Iteration.id)
+            .where(Iteration.project_id == project_id)
+            .order_by(WorkflowRun.id.desc())
+        )
+    ).all()
+    return [
+        {
+            "id": run.id,
+            "iteration_id": run.iteration_id,
+            "iteration_number": int(number),
+            "iteration_title": str(title),
+            "workflow_id": run.workflow_id,
+            "workflow_code": run.workflow_code,
+            "status": run.status,
+            "summary": run.summary,
+            "trigger": run.trigger,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+            "created_at": run.created_at,
+        }
+        for run, number, title in rows
+    ]
+
+
 async def list_jobs(session: AsyncSession, *, run_id: int) -> list[WorkflowJob]:
     """运行下全部作业（按 order_index）。"""
     return list(

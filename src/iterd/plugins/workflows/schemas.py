@@ -151,3 +151,20 @@ class WorkflowJobOut(BaseModel):
     artifact_code: str = ""
     version_no: int | None = None
     steps: list[WorkflowJobStepOut] = []
+
+
+class ProjectRunItemOut(BaseModel):
+    """项目级审查运行列表项（跨迭代汇总，下钻复用运行详情）."""
+
+    id: int
+    iteration_id: int
+    iteration_number: int
+    iteration_title: str
+    workflow_id: int
+    workflow_code: str
+    status: str
+    summary: dict[str, Any] | None
+    trigger: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime

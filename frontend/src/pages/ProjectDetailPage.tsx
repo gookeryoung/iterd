@@ -8,6 +8,8 @@ import { ROLE_LABELS } from '../types';
 import { formatDateTime } from '../utils/format';
 import IterationsTab from '../components/IterationsTab';
 import MembersTab from '../components/MembersTab';
+import DocLibraryTab from '../components/DocLibraryTab';
+import ProjectRunsTab from '../components/ProjectRunsTab';
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -62,12 +64,22 @@ export default function ProjectDetailPage() {
       </Descriptions>
 
       <Tabs
-        defaultActiveKey="iterations"
+        defaultActiveKey="library"
         items={[
+          {
+            key: 'library',
+            label: '文档库',
+            children: <DocLibraryTab projectId={projectId} />,
+          },
           {
             key: 'iterations',
             label: '迭代',
             children: <IterationsTab projectId={projectId} />,
+          },
+          {
+            key: 'reviews',
+            label: '审查',
+            children: <ProjectRunsTab projectId={projectId} />,
           },
           {
             key: 'members',

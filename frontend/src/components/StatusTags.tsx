@@ -4,9 +4,11 @@ import { Tag } from 'antd';
 import {
   ARTIFACT_CATEGORY_LABELS,
   ITERATION_STATUS_LABELS,
+  REVIEW_STATUS_LABELS,
   SEVERITY_LABELS,
   type ArtifactCategory,
   type IterationStatus,
+  type ReviewStatus,
   type Severity,
 } from '../types';
 
@@ -25,4 +27,16 @@ export function IterationStatusTag({ status }: { status: IterationStatus }) {
 /** 产物类别标签。 */
 export function CategoryTag({ category }: { category: ArtifactCategory }) {
   return <Tag>{ARTIFACT_CATEGORY_LABELS[category] ?? category}</Tag>;
+}
+
+/** 审查状态标签：passed 绿 / failed 红 / running 蓝 / unreviewed 灰 / stale 橙。 */
+export function ReviewStatusTag({ status }: { status: ReviewStatus }) {
+  const colorMap: Record<ReviewStatus, string> = {
+    passed: 'green',
+    failed: 'red',
+    running: 'blue',
+    unreviewed: 'default',
+    stale: 'orange',
+  };
+  return <Tag color={colorMap[status]}>{REVIEW_STATUS_LABELS[status]}</Tag>;
 }

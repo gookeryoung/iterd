@@ -7,9 +7,11 @@ import type {
   ArtifactInput,
   ArtifactLink,
   ArtifactLinkInput,
+  ArtifactReviewStatus,
   ArtifactUpdateInput,
   ArtifactVersion,
   LinkType,
+  ProjectLink,
 } from '../types';
 
 /** 产物列表（iteration_id / project_id 至少一个）。 */
@@ -123,5 +125,18 @@ export const CATEGORY_OPTIONS: { value: ArtifactCategory; label: string }[] = [
   { value: 'drawing', label: '图纸' },
   { value: 'model', label: '模型' },
   { value: 'spec', label: '规格' },
+  { value: 'manual', label: '技术说明书' },
   { value: 'result', label: '结果' },
 ];
+
+/** 项目级产物审查状态聚合（版本感知，含失败明细）。 */
+export async function fetchProjectReviewStatus(projectId: number): Promise<ArtifactReviewStatus[]> {
+  const resp = await api.get<ArtifactReviewStatus[]>(`/projects/${projectId}/review-status`);
+  return resp.data;
+}
+
+/** 项目级 part_of 关联边（图样树构建用）。 */
+export async function fetchProjectLinks(projectId: number): Promise<ProjectLink[]> {
+  const resp = await api.get<ProjectLink[]>(`/projects/${projectId}/artifact-links`);
+  return resp.data;
+}

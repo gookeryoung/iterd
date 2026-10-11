@@ -89,7 +89,7 @@ export interface IterationInput {
 }
 
 /** 产物类别。 */
-export type ArtifactCategory = 'drawing' | 'model' | 'spec' | 'result';
+export type ArtifactCategory = 'drawing' | 'model' | 'spec' | 'manual' | 'result';
 
 /** 产物。 */
 export interface Artifact {
@@ -551,8 +551,75 @@ export const ARTIFACT_CATEGORY_LABELS: Record<ArtifactCategory, string> = {
   drawing: '图纸',
   model: '模型',
   spec: '规格',
+  manual: '技术说明书',
   result: '结果',
 };
+
+/** 产物审查状态（版本感知：最近一次检查运行结论）。 */
+export type ReviewStatus = 'passed' | 'failed' | 'running' | 'unreviewed' | 'stale';
+
+/** 审查状态中文标签映射。 */
+export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
+  passed: '通过',
+  failed: '未通过',
+  running: '运行中',
+  unreviewed: '未审查',
+  stale: '已过期',
+};
+
+/** 项目审查状态聚合中的单条发现项。 */
+export interface ReviewFinding {
+  id: number;
+  check_run_id: number;
+  artifact_version_id: number;
+  version_no: number;
+  rule_id: number;
+  rule_code: string;
+  rule_name: string;
+  severity: Severity;
+  location: string;
+  message: string;
+}
+
+/** 项目级产物审查状态聚合项。 */
+export interface ArtifactReviewStatus {
+  artifact_id: number;
+  code: string;
+  name: string;
+  category: ArtifactCategory;
+  iteration_id: number;
+  current_version_id: number | null;
+  status: ReviewStatus;
+  check_run_id: number | null;
+  check_run_status: string | null;
+  last_checked_at: string | null;
+  last_check_started_at: string | null;
+  findings: ReviewFinding[];
+}
+
+/** 项目级产物关联边（图样树构建用）。 */
+export interface ProjectLink {
+  id: number;
+  src_artifact_id: number;
+  dst_artifact_id: number;
+  link_type: string;
+}
+
+/** 项目级审查运行列表项（跨迭代汇总）。 */
+export interface ProjectRunItem {
+  id: number;
+  iteration_id: number;
+  iteration_number: number;
+  iteration_title: string;
+  workflow_id: number;
+  workflow_code: string;
+  status: WorkflowRunStatus;
+  summary: WorkflowRunSummary | null;
+  trigger: WorkflowTrigger;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
 
 /** 规则分类中文标签映射。 */
 export const RULE_CATEGORY_LABELS: Record<RuleCategory, string> = {

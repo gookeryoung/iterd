@@ -178,6 +178,19 @@ async def list_workflow_runs(iteration_id: int, user: CurrentUser, session: Sess
     return outs
 
 
+@router.get("/projects/{project_id}/workflow-runs", response_model=list[schemas.ProjectRunItemOut])
+async def list_project_runs(project_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.ProjectRunItemOut]:
+    """项目级运行列表（跨迭代汇总，viewer+，按 id 倒序）。"""
+    await project_services.get_project(session, project_id)
+    await rbac.require_project_role(
+        session, project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    return [
+        schemas.ProjectRunItemOut.model_validate(item)
+        for item in await services.list_project_runs(session, project_id=project_id)
+    ]
+
+
 @router.get("/workflow-runs/{run_id}", response_model=schemas.WorkflowRunOut)
 async def get_workflow_run(run_id: int, user: CurrentUser, session: SessionDep) -> schemas.WorkflowRunOut:
     """运行详情（含全部作业、日志与绑定信息；viewer+）。"""

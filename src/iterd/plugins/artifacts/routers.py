@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, Response, UploadFile
 from iterd.api.deps import CurrentUser, SessionDep
 from iterd.core.errors import not_found
 from iterd.core.storage import get_storage
-from iterd.plugins.artifacts import schemas, services
+from iterd.plugins.artifacts import library, schemas, services
 from iterd.plugins.projects import rbac
 from iterd.plugins.projects import services as project_services
 
@@ -214,3 +214,29 @@ async def get_version(version_id: int, user: CurrentUser, session: SessionDep) -
         session, artifact.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
     )
     return schemas.ArtifactVersionOut.model_validate(version)
+
+
+@router.get("/projects/{project_id}/review-status", response_model=list[schemas.ArtifactReviewStatusOut])
+async def project_review_status(
+    project_id: int, user: CurrentUser, session: SessionDep
+) -> list[schemas.ArtifactReviewStatusOut]:
+    """项目级产物审查状态聚合（viewer+；版本感知，含失败明细）。"""
+    await project_services.get_project(session, project_id)
+    await rbac.require_project_role(
+        session, project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    items = await library.project_review_status(session, project_id=project_id)
+    return [schemas.ArtifactReviewStatusOut.model_validate(item) for item in items]
+
+
+@router.get("/projects/{project_id}/artifact-links", response_model=list[schemas.ProjectLinkOut])
+async def project_artifact_links(
+    project_id: int, user: CurrentUser, session: SessionDep
+) -> list[schemas.ProjectLinkOut]:
+    """项目级 part_of 关联边（viewer+；两端点均在项目内，供图样树构建）。"""
+    await project_services.get_project(session, project_id)
+    await rbac.require_project_role(
+        session, project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    links = await library.project_part_of_links(session, project_id=project_id)
+    return [schemas.ProjectLinkOut.model_validate(link) for link in links]
