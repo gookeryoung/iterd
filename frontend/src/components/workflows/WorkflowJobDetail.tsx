@@ -391,15 +391,38 @@ export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDeta
           <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
             检查发现项
           </Typography.Text>
-          <Table<Finding>
-            rowKey="id"
-            columns={findingColumns}
-            dataSource={findingsAllQuery.data ?? []}
-            loading={findingsAllQuery.isPending}
-            pagination={false}
-            size="small"
-            locale={{ emptyText: '无发现项' }}
-          />
+          {findingsAllQuery.isError ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 12px',
+                borderRadius: 6,
+                background: PRIMER_COLORS.dangerBg,
+                border: '1px solid rgba(207, 34, 46, 0.4)',
+                color: PRIMER_COLORS.danger,
+                fontSize: 13,
+              }}
+            >
+              <FailureIcon size={14} />
+              <span>
+                发现项加载失败（检查运行 #{job.check_run_id}）：
+                {(findingsAllQuery.error as Error | null)?.message ?? '未知错误'}
+                ，请刷新页面或检查服务端日志
+              </span>
+            </div>
+          ) : (
+            <Table<Finding>
+              rowKey="id"
+              columns={findingColumns}
+              dataSource={findingsAllQuery.data ?? []}
+              loading={findingsAllQuery.isPending}
+              pagination={false}
+              size="small"
+              locale={{ emptyText: '无发现项' }}
+            />
+          )}
         </div>
       )}
       {job.job_type === 'simulation' && simResultQuery.data && (
