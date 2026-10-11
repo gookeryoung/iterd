@@ -1,4 +1,4 @@
-"""projects API 测试：项目树 / RBAC / 迭代状态机 / 基线."""
+"""projects API 测试：项目树 / RBAC / 迭代状态机."""
 
 from __future__ import annotations
 
@@ -166,30 +166,9 @@ def test_iteration_time_window(client: TestClient, project: dict[str, Any]) -> N
     assert updated.json()["end_date"] == "2026-02-28"
 
 
-def test_baseline_locks_versions(client: TestClient, project: dict[str, Any], iteration: dict[str, Any]) -> None:
-    # planned 迭代不允许建基线
-    early = client.post(f"/api/v1/iterations/{iteration['id']}/baselines", json={"name": "早期基线"})
-    assert early.status_code == 400
-
-    client.patch(f"/api/v1/iterations/{iteration['id']}", json={"title": "迭代一", "status": "active"})
-    art = client.post(
-        f"/api/v1/artifacts?iteration_id={iteration['id']}", json={"code": "A-1", "name": "零件", "category": "drawing"}
-    )
-    version = client.post(
-        f"/api/v1/artifacts/{art.json()['id']}/versions",
-        files={"file": ("A-1_revA.dwg", b"v1")},
-        data={"metadata": '{"材料": "Q235"}'},
-    )
-    assert version.status_code == 201
-
-    baseline = client.post(f"/api/v1/iterations/{iteration['id']}/baselines", json={"name": "BL-1"})
-    assert baseline.status_code == 201
-    # 基线后再上传新版本，快照不受影响
-    client.post(f"/api/v1/artifacts/{art.json()['id']}/versions", files={"file": ("A-1_revB.dwg", b"v2")})
-    detail = client.get(f"/api/v1/baselines/{baseline.json()['id']}")
-    items = detail.json()["items"]
-    assert len(items) == 1
-    assert items[0]["artifact_version_id"] == version.json()["id"]
-
-    baselines = client.get(f"/api/v1/iterations/{iteration['id']}/baselines")
-    assert len(baselines.json()) == 1
+def test_iteration_baselines_removed(client: TestClient, iteration: dict[str, Any]) -> None:
+    """基线功能已移除：GET 404 / POST 405（迁移 0004 破坏性变更的回归守卫）."""
+    iid = iteration["id"]
+    assert client.get(f"/api/v1/iterations/{iid}/baselines").status_code == 404
+    assert client.post(f"/api/v1/iterations/{iid}/baselines", json={"name": "BL"}).status_code == 405
+    assert client.get("/api/v1/baselines/1").status_code == 404

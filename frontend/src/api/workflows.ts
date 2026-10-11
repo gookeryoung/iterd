@@ -1,7 +1,9 @@
-/** 审查流水线（workflows）相关 API：模板 / 运行 / rerun。 */
+/** 审查流水线（workflows）相关 API：模板 / 提交方案 / 运行 / rerun。 */
 
 import { api } from './client';
 import type {
+  IterationSubmission,
+  SubmissionInput,
   WorkflowRun,
   WorkflowTemplate,
   WorkflowTemplateInput,
@@ -9,6 +11,30 @@ import type {
 } from '../types';
 
 export type { WorkflowTemplateInput, WorkflowTemplateUpdateInput };
+
+/** 提交迭代方案（后端 202，为每个启用模板各产生一条运行）。 */
+export async function createSubmission(
+  iterationId: number,
+  data: SubmissionInput,
+): Promise<IterationSubmission> {
+  const resp = await api.post<IterationSubmission>(
+    `/iterations/${iterationId}/submissions`,
+    data,
+  );
+  return resp.data;
+}
+
+/** 迭代下提交方案列表（含各自触发的运行）。 */
+export async function fetchSubmissions(iterationId: number): Promise<IterationSubmission[]> {
+  const resp = await api.get<IterationSubmission[]>(`/iterations/${iterationId}/submissions`);
+  return resp.data;
+}
+
+/** 提交方案详情。 */
+export async function fetchSubmission(id: number): Promise<IterationSubmission> {
+  const resp = await api.get<IterationSubmission>(`/submissions/${id}`);
+  return resp.data;
+}
 
 /** 模板列表（可按项目过滤，含全局）。 */
 export async function fetchWorkflows(projectId?: number): Promise<WorkflowTemplate[]> {

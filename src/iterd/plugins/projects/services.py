@@ -1,4 +1,4 @@
-"""projects 服务层：项目树 / 迭代状态机 / 成员 / 基线."""
+"""projects 服务层：项目树 / 迭代状态机 / 成员."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from iterd.core.errors import IterdError, not_found
 from iterd.plugins.notify import audit
 from iterd.plugins.projects.models import (
-    Baseline,
-    BaselineItem,
     Iteration,
     Project,
     ProjectMember,
@@ -222,46 +220,6 @@ async def list_iterations(session: AsyncSession, project_id: int) -> list[Iterat
     )
 
 
-async def create_baseline(session: AsyncSession, *, actor_id: int, iteration_id: int, name: str) -> Baseline:
-    """建立基线：锁定迭代内全部产物的当前版本快照，建立后不受新上传影响."""
-    from iterd.plugins.artifacts.models import Artifact
-
-    iteration = await get_iteration(session, iteration_id)
-    if iteration.status == "planned":
-        raise IterdError("规划中的迭代不允许建立基线", code="ITERD-INVALID_STATE")
-    baseline = Baseline(iteration_id=iteration_id, name=name, created_by=actor_id)
-    session.add(baseline)
-    await session.flush()
-    artifacts = list(
-        (
-            await session.execute(select(Artifact).where(Artifact.iteration_id == iteration_id).order_by(Artifact.id))
-        ).scalars()
-    )
-    for artifact in artifacts:
-        if artifact.current_version_id is None:
-            continue
-        session.add(
-            BaselineItem(
-                baseline_id=baseline.id, artifact_id=artifact.id, artifact_version_id=artifact.current_version_id
-            )
-        )
-    urn = await register(
-        session, node_type="baseline", ref_table="baselines", ref_id=baseline.id, display_name=baseline.name
-    )
-    iteration_urn = await _iteration_urn(session, iteration_id)
-    await ensure_link(session, src=iteration_urn, dst=urn, link_type="contains")
-    await audit(
-        session,
-        actor_id=actor_id,
-        actor_name="",
-        action="baseline.create",
-        resource_type="baseline",
-        resource_id=baseline.id,
-        after={"name": name, "iteration_id": iteration_id, "urn": urn},
-    )
-    return baseline
-
-
 async def _iteration_urn(session: AsyncSession, iteration_id: int) -> str:
     from iterd.plugins.trace.models import TraceNode
 
@@ -272,17 +230,3 @@ async def _iteration_urn(session: AsyncSession, iteration_id: int) -> str:
     if urn is None:
         raise not_found(f"迭代溯源节点不存在: {iteration_id}")
     return urn
-
-
-async def list_baselines(session: AsyncSession, iteration_id: int) -> list[Baseline]:
-    """迭代下基线列表."""
-    return list(
-        (
-            await session.execute(select(Baseline).where(Baseline.iteration_id == iteration_id).order_by(Baseline.id))
-        ).scalars()
-    )
-
-
-async def get_baseline_items(session: AsyncSession, baseline_id: int) -> list[BaselineItem]:
-    """基线快照条目."""
-    return list((await session.execute(select(BaselineItem).where(BaselineItem.baseline_id == baseline_id))).scalars())

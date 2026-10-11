@@ -63,6 +63,44 @@ class WorkflowRunIn(BaseModel):
     workflow_id: int
 
 
+class SubmissionIn(BaseModel):
+    """提交迭代方案入参."""
+
+    title: str = Field(min_length=1, max_length=128)
+    note: str = Field(default="", max_length=1024)
+
+
+class WorkflowJobStepOut(BaseModel):
+    """流水线步骤对外结构（logs 行含相对时间戳与级别）."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: int
+    step_key: str
+    name: str
+    status: str
+    conclusion: str | None
+    order_index: int
+    logs: list[dict[str, Any]] | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class SubmissionOut(BaseModel):
+    """提交方案对外结构（嵌触发产生的运行概要）."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    iteration_id: int
+    title: str
+    note: str
+    submitted_by: int | None
+    created_at: datetime
+    runs: list[WorkflowRunOut] = []
+
+
 class WorkflowRunOut(BaseModel):
     """审查运行对外结构（含作业概要）."""
 
@@ -76,15 +114,18 @@ class WorkflowRunOut(BaseModel):
     status: str
     summary: dict[str, Any] | None
     created_by: int | None
+    submission_id: int | None
+    trigger: str
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
     task_id: int | None = None
+    submission_title: str = ""
     jobs: list[WorkflowJobOut] = []
 
 
 class WorkflowJobOut(BaseModel):
-    """流水线作业对外结构（绑定展示字段由服务层填充）."""
+    """流水线作业对外结构（绑定展示字段与步骤由服务层填充）."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -99,7 +140,7 @@ class WorkflowJobOut(BaseModel):
     conclusion: str | None
     check_run_id: int | None
     sim_job_id: int | None
-    logs: list[dict[str, str]] | None
+    logs: list[dict[str, Any]] | None
     order_index: int
     started_at: datetime | None
     finished_at: datetime | None
@@ -109,3 +150,4 @@ class WorkflowJobOut(BaseModel):
     solver_type: str = ""
     artifact_code: str = ""
     version_no: int | None = None
+    steps: list[WorkflowJobStepOut] = []

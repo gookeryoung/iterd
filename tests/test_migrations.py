@@ -91,6 +91,65 @@ def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
     assert "role" in columns
 
 
+def test_0004_upgrade_and_downgrade_roundtrip(env: Path) -> None:
+    """0004 升级：建提交/步骤表、workflow_runs 增列、删基线三表；降级：反向还原结构."""
+    from alembic import command
+
+    cfg = build_config()
+
+    # 升级到 0003（前置版本）
+    command.upgrade(cfg, "0003")
+    url = _sync_url()
+    tables = _table_names(url)
+    assert {"baselines", "baseline_items", "rule_set_bindings"} <= tables
+    assert "iteration_submissions" not in tables
+
+    # 升级到 0004
+    command.upgrade(cfg, "0004")
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            inspector = sa.inspect(conn)
+            tables = set(inspector.get_table_names())
+            assert {"iteration_submissions", "workflow_job_steps"} <= tables
+            assert not {"baselines", "baseline_items", "rule_set_bindings"} & tables
+            run_cols = {c["name"] for c in inspector.get_columns("workflow_runs")}
+            assert {"submission_id", "trigger"} <= run_cols
+            assert "ix_workflow_runs_submission_id" in {ix["name"] for ix in inspector.get_indexes("workflow_runs")}
+            step_cols = {c["name"] for c in inspector.get_columns("workflow_job_steps")}
+            assert {"job_id", "step_key", "status", "conclusion", "order_index", "logs"} <= step_cols
+            version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
+    finally:
+        engine.dispose()
+    assert version == "0004"
+
+    # 降级回 0003：删新表与新列，重建基线三表结构（数据不恢复）
+    command.downgrade(cfg, "0003")
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            inspector = sa.inspect(conn)
+            tables = set(inspector.get_table_names())
+            assert not {"iteration_submissions", "workflow_job_steps"} & tables
+            assert {"baselines", "baseline_items", "rule_set_bindings"} <= tables
+            run_cols = {c["name"] for c in inspector.get_columns("workflow_runs")}
+            assert not {"submission_id", "trigger"} & run_cols
+            version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
+    finally:
+        engine.dispose()
+    assert version == "0003"
+
+    # 再次升级到 head 幂等无异常
+    command.upgrade(cfg, "head")
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
+    finally:
+        engine.dispose()
+    assert version == _head_revision()
+
+
 def test_load_example_db_is_versioned_and_serve_ready(tmp_path: Path) -> None:
     """载入脚本建库走 alembic（E2E 回归）：库带版本号，serve 启动迁移幂等.
 

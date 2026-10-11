@@ -13,7 +13,7 @@ import {
   type WorkflowJob,
 } from '../../types';
 import { formatDateTime } from '../../utils/format';
-import { FailureIcon, JobTypeBadge, JobStatusIcon, PRIMER_COLORS } from './RunStatusIcon';
+import { FailureIcon, JobTypeBadge, JobStatusIcon, PRIMER_COLORS, StepStatusIcon } from './RunStatusIcon';
 
 /** 耗时计算（started_at → finished_at）。 */
 function durationText(job: WorkflowJob): string {
@@ -29,6 +29,16 @@ function durationText(job: WorkflowJob): string {
     return `${(ms / 1000).toFixed(1)} s`;
   }
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+/** 步骤耗时文本。 */
+function stepDurationText(startedAt: string | null, finishedAt: string | null): string {
+  if (!startedAt) {
+    return '';
+  }
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
+  const ms = Math.max(end - new Date(startedAt).getTime(), 0);
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 /** annotation 卡（GitHub 标注样式：黄/红底色条）。 */
@@ -70,7 +80,7 @@ function Annotation({ level, message, location }: { level: 'error' | 'warning'; 
   );
 }
 
-/** finding 表列定义（复用既有 CheckTab 列风格）。 */
+/** finding 表列定义（GitHub Actions 发现项表风格）。 */
 const findingColumns: ColumnsType<Finding> = [
   {
     title: '级别',
@@ -127,9 +137,11 @@ const metricColumns: ColumnsType<SimResultDetail> = [
 /** 作业详情属性。 */
 interface WorkflowJobDetailProps {
   job: WorkflowJob;
+  /** 步骤点击回调（父组件切换到步骤详情）。 */
+  onSelectStep?: (stepId: number) => void;
 }
 
-export default function WorkflowJobDetail({ job }: WorkflowJobDetailProps) {
+export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDetailProps) {
   // 规则作业：拉取发现项（annotations + 结构化表）
   const findingsQuery = useQuery({
     queryKey: ['workflow-job-findings', job.check_run_id],
@@ -210,6 +222,67 @@ export default function WorkflowJobDetail({ job }: WorkflowJobDetailProps) {
           </span>
         )}
       </div>
+
+      {/* 步骤概要（平台内置执行环节，点击进入步骤日志） */}
+      {job.steps.length > 0 && (
+        <div
+          style={{
+            border: `1px solid ${PRIMER_COLORS.border}`,
+            borderRadius: 6,
+            overflow: 'hidden',
+            marginBottom: 12,
+          }}
+        >
+          <div
+            style={{
+              background: PRIMER_COLORS.canvas,
+              borderBottom: `1px solid ${PRIMER_COLORS.border}`,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: PRIMER_COLORS.text,
+            }}
+          >
+            步骤
+          </div>
+          {job.steps.map((step) => {
+            const duration = stepDurationText(step.started_at, step.finished_at);
+            return (
+              <div
+                key={step.id}
+                onClick={() => onSelectStep?.(step.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 12px',
+                  cursor: onSelectStep ? 'pointer' : 'default',
+                  borderBottom: `1px solid ${PRIMER_COLORS.border}`,
+                }}
+                onMouseEnter={(e) => {
+                  if (onSelectStep) {
+                    e.currentTarget.style.background = PRIMER_COLORS.canvas;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (onSelectStep) {
+                    e.currentTarget.style.background = '';
+                  }
+                }}
+              >
+                <StepStatusIcon status={step.status} conclusion={step.conclusion} />
+                <span style={{ color: PRIMER_COLORS.text, fontSize: 12.5 }}>{step.name}</span>
+                <Typography.Text code style={{ fontSize: 11 }}>
+                  {step.step_key}
+                </Typography.Text>
+                {duration && (
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: PRIMER_COLORS.neutral }}>{duration}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* annotations：error 级发现项 / 超阈指标（GitHub 标注卡样式） */}
       {job.job_type === 'rules' && errorFindings.length > 0 && (

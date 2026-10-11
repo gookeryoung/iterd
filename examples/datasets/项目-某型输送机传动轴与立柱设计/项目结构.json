@@ -25,7 +25,7 @@
       "number": 1,
       "project_code": "AXLE-2026",
       "title": "传动方案设计",
-      "objective": "确定传动链布置与轴系主要参数，输出总图并归档基线",
+      "objective": "确定传动链布置与轴系主要参数，输出总图并归档",
       "start_date": "2026-07-01",
       "end_date": "2026-08-15",
       "status": "closed"
@@ -48,8 +48,5 @@
       "end_date": "2026-10-20",
       "status": "active"
     }
-  ],
-  "baselines": [
-    { "project_code": "AXLE-2026", "iteration_number": 1, "name": "BL-传动方案基线" }
   ]
 }

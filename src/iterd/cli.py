@@ -300,18 +300,18 @@ def cmd_seed() -> None:
         print(
             "[seed] 演示流程："
             f"规则集{'新建' if flow.get('rule_set') else '沿用'} / "
-            f"绑定{'新建' if flow.get('binding') else '沿用'} / "
             f"迭代{'已激活' if flow.get('activated') else '沿用状态'} / "
-            f"基线{'新建' if flow.get('baseline') else '沿用'} / "
-            f"检查运行{'#' + str(flow['check_run_id']) if flow.get('check_run_id') else '沿用'}"
+            f"审查模板{'新建' if flow.get('workflow') else '沿用'} / "
+            f"提交方案{'#' + str(flow['submission_id']) if flow.get('submission_id') else '沿用'} / "
+            f"运行 {flow.get('runs', 0)} 条"
         )
     cases = summary.get("cases") or []
     if cases:
-        print(f"[seed] 典型案例（{len(cases)} 个数据集，检查/仿真已预执行，打开界面即可查看）：")
+        print(f"[seed] 典型案例（{len(cases)} 个数据集，流水线已预执行，打开界面即可查看）：")
         for case in cases:
             print(
                 f"  {case['name']}：项目 {case['projects']} / 迭代 {case['iterations']} / "
-                f"产物 {case['artifacts']} / 检查 {len(case['checks'])} / 仿真 {len(case['sims'])}"
+                f"产物 {case['artifacts']} / 流水线运行 {len(case['workflows'])}"
             )
     else:
         print("[seed] 未找到 examples/datasets（非源码仓库），跳过典型案例载入")

@@ -1,5 +1,5 @@
 {
-  "_comment": "示例数据自检基线：载入本数据集后对「迭代 2」执行「传动系统设计规范」规则集检查，CheckRun.summary 应与 expected_summary 一致；仿真作业按 expected_simulations 发起（模板 + 绑定产物），verdict 与 failed_keys 用于核对结果页展示。编码规范 / 数值范围 / 扩展名白名单三类新检查器的发现项全部来自本数据集设计数据。",
+  "_comment": "示例数据预期结果：审查流水线 rules/check 作业产出的 CheckRun.summary 应与 expected_summary 一致；流水线覆盖的仿真作业 verdict 与 failed_keys 用于核对结果页展示（SHAFT-OVERLOAD-CHECK / COL-SLENDER-CHECK 未纳入流水线，保留作结果页阈值判定展示）。编码规范 / 数值范围 / 扩展名白名单三类新检查器的发现项全部来自本数据集设计数据。",
   "iteration": { "project_code": "AXLE-2026", "number": 2 },
   "rule_set": "传动系统设计规范",
   "expected_summary": {

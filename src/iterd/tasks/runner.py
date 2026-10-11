@@ -39,15 +39,17 @@ class _LiveContext:
 
     def __init__(self) -> None:
         self.progress_data: dict[str, Any] = {"stage": "", "percent": 0}
-        self.log_entries: list[dict[str, str]] = []
+        self.log_entries: list[dict[str, Any]] = []
+        self._started_at = datetime.now(UTC)
 
     def progress(self, stage: str, percent: int) -> None:
         """记录进度（percent 0-100）。"""
         self.progress_data = {"stage": stage, "percent": max(0, min(100, percent))}
 
     def log(self, level: str, message: str) -> None:
-        """追加日志条目。"""
-        self.log_entries.append({"level": level, "message": message})
+        """追加日志条目（ts 为相对任务开始时刻的秒数）。"""
+        ts = round(max((datetime.now(UTC) - self._started_at).total_seconds(), 0.0), 3)
+        self.log_entries.append({"ts": ts, "level": level, "message": message})
 
 
 async def claim_next_task(session: AsyncSession, worker_id: str) -> Task | None:

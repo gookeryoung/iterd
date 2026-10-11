@@ -102,38 +102,3 @@ class IterationOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-
-
-class BaselineIn(BaseModel):
-    """建立基线入参."""
-
-    name: str = Field(min_length=1, max_length=128)
-
-
-class BaselineItemOut(BaseModel):
-    """基线条目对外结构."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    artifact_id: int
-    artifact_version_id: int
-
-
-class BaselineOut(BaseModel):
-    """基线对外结构."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    uid: str
-    iteration_id: int
-    name: str
-    created_by: int | None
-    created_at: datetime
-
-
-class BaselineDetailOut(BaselineOut):
-    """基线详情：含版本快照条目."""
-
-    items: list[BaselineItemOut] = []

@@ -17,27 +17,28 @@ examples/
 ## 数据集：某型带式输送机机架结构设计
 
 场景：带宽 800mm、机长 24m 带式输送机的机架结构设计，含 2 个项目（父子）、3 个迭代、
-7 个产物、4 条规则、2 个规则集、2 个仿真模板，覆盖"上传产物 → 规则检查 → 仿真验证 → 基线归档"完整链路。
+7 个产物、4 条规则、2 个规则集、2 个仿真模板，覆盖"上传产物 → 提交方案 → 审查流水线 → 运行结果"完整链路。
 
 ### 元数据定义（可直接映射到 API 入参）
 
 | 文件 | 说明 |
 | --- | --- |
-| `项目结构.json` | 项目树、成员角色、迭代（含时间窗与状态机）、基线 |
+| `项目结构.json` | 项目树、成员角色、迭代（含时间窗与状态机） |
 | `规则库.json` | 规则条目：`checker_type` 与 `params` 对应 `GET /api/v1/checkers` 已注册检查器 |
-| `规则集.json` | 规则集成员与迭代绑定关系 |
+| `规则集.json` | 规则集成员（经审查模板 rules/check 作业的 `with.rule_set` 引用生效） |
 | `仿真模板.json` | 仿真求解器、默认参数与验收阈值（`{指标: {min\|max}}`） |
+| `审查模板.yaml` | 审查流水线编排（提交方案触发运行） |
 | `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
 | `产物元数据.csv` | 各产物版本的元数据（材料/尺寸/公差/粗糙度/设计者/校核者） |
 | `载荷工况.csv` | 设计输入：四种工况载荷与安全系数要求 |
 | `材料清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
-| `预期检查结果.json` | 自检基线：检查汇总与仿真结论的期望值 |
+| `预期检查结果.json` | 预期结果：检查汇总与仿真结论的期望值 |
 
 ### 产物实体文件（上传用）
 
 | 文件 | 类别 | 说明 |
 | --- | --- | --- |
-| `DRW-000_revA.dxf` | drawing | 迭代 1 概念方案总图（基线快照） |
+| `DRW-000_revA.dxf` | drawing | 迭代 1 概念方案总图（归档对象，不参与后续检查） |
 | `DRW-001_revA.dxf` | drawing | 机架总装图，命名与元数据均合规 |
 | `DRW-002_revA.dxf` | drawing | 横梁零件图，仿真验证对象 |
 | `MOD-001_revA.step` | model | STEP AP203 三维模型 |
@@ -51,29 +52,30 @@ examples/
   `{"error": 2, "warning": 1, "info": 2, "artifacts": 6, "rules": 4}`；
   5 条发现项来源：文件名不规范（error）、缺公差（error + warning）、缺校核者（2 条 info）。
 - 仿真：`BEAM-STATIC-CHECK`（8000N）结论 `pass`；`BEAM-HEAVY-CHECK`（15000N）三项指标全部超阈，结论 `fail`。
-- 完整基线见 `预期检查结果.json`。
+- 完整预期见 `预期检查结果.json`。
 
 ## 数据集：某型带式输送机托辊组件开发（边界异常数据）
 
 场景：带宽 1000mm 带式输送机托辊组件开发，含 2 个项目（父子）、3 个迭代（active / planned / 子项目 active）、
 6 个产物、5 条规则（含 1 条停用）、1 个规则集、3 个仿真模板，
 专门覆盖文件名异常、元数据类型错误与字段缺失、planned 迭代、viewer 成员、
-子项目基线与三种仿真判定结论（pass / 单指标超阈 / 全指标超阈）等边界场景。
+三种仿真判定结论（pass / 单指标超阈 / 全指标超阈）等边界场景。
 14 个边界场景的完整清单见数据集内 `边界场景说明.csv`。
 
 ### 元数据定义（可直接映射到 API 入参）
 
 | 文件 | 说明 |
 | --- | --- |
-| `项目结构.json` | 项目树、成员角色（含 admin 以 viewer 参与）、迭代（含 planned 状态）、子项目基线 |
+| `项目结构.json` | 项目树、成员角色（含 admin 以 viewer 参与）、迭代（含 planned 状态） |
 | `规则库.json` | 规则条目：含 `enabled=false` 停用规则（NAME-004）与 number/bool 类型校验规则 |
-| `规则集.json` | 规则集成员（含停用规则）与迭代绑定关系 |
+| `规则集.json` | 规则集成员（含停用规则，经审查模板引用生效） |
 | `仿真模板.json` | 三个载荷档位模板共用辊筒轴几何与阈值 |
+| `审查模板.yaml` | 审查流水线编排（rules 门禁 + 三档载荷并行仿真） |
 | `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
 | `产物元数据.csv` | 各产物版本的元数据（数值/布尔字段刻意含类型错误样本） |
 | `边界场景说明.csv` | 边界场景清单：编号、类别、数据特征、预期表现 |
 | `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
-| `预期检查结果.json` | 自检基线：检查汇总、发现项与三种仿真结论的期望值 |
+| `预期检查结果.json` | 预期结果：检查汇总、发现项与三种仿真结论的期望值 |
 
 ### 产物实体文件（上传用）
 
@@ -92,13 +94,13 @@ examples/
   `{"error": 4, "warning": 2, "info": 1, "artifacts": 6, "rules": 4}`；
   7 条发现项：文件名不规范 2 条（error）、数值类型错误 1 条（error）、布尔类型错误 1 条（warning）、
   元数据缺失 2 条（error + warning）、缺设计者 1 条（info）；停用规则 NAME-004 不产生发现项且不计入 rules。
-- 仿真（绑定 RLL-101）：`TRL-LIGHT-CHECK`（1200N）`pass`；
+- 仿真（引用 RLL-101）：`TRL-LIGHT-CHECK`（1200N）`pass`；
   `TRL-NOMINAL-CHECK`（2000N）仅挠度单指标超阈 `fail`；`TRL-OVERLOAD-CHECK`（4500N）三项全部超阈 `fail`。
-- 完整基线见 `预期检查结果.json`。
+- 完整预期见 `预期检查结果.json`。
 
 ## 数据集：某型输送机传动轴与立柱设计（检查器/求解器扩展）
 
-场景：带宽 800mm 带式输送机传动系统设计，含 2 个项目（父子）、3 个迭代（父#1 closed 含基线）、
+场景：带宽 800mm 带式输送机传动系统设计，含 2 个项目（父子）、3 个迭代、
 8 个产物、6 条规则、1 个规则集、4 个仿真模板，
 覆盖新增的产物编码规范（artifact_code_convention）、重量数值范围（metadata_range）、
 扩展名白名单（file_extension_whitelist）三类检查器与压杆稳定性（column_buckling）、
@@ -108,18 +110,19 @@ examples/
 
 | 文件 | 说明 |
 | --- | --- |
-| `项目结构.json` | 项目树、成员角色、迭代（含 closed 状态与基线） |
+| `项目结构.json` | 项目树、成员角色、迭代（含 closed 状态） |
 | `规则库.json` | 规则条目：覆盖三类新检查器与两类元数据必填规则 |
-| `规则集.json` | 规则集成员与迭代绑定关系 |
+| `规则集.json` | 规则集成员（经审查模板引用生效） |
 | `仿真模板.json` | 轴扭转与立柱稳定两类求解器、四种判定工况模板 |
+| `审查模板.yaml` | 审查流水线编排（串行门禁 / 并行仿真 / 门禁拦截三例） |
 | `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
 | `产物元数据.csv` | 各产物版本的元数据（含重量超范围、缺校核者样本） |
 | `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
-| `预期检查结果.json` | 自检基线：检查汇总、发现项与四种仿真结论的期望值 |
+| `预期检查结果.json` | 预期结果：检查汇总、发现项与四种仿真结论的期望值 |
 
 ### 审查流水线示例（审查模板.yaml）
 
-数据集内 `审查模板.yaml` 提供三类典型流水线（`--with-workflow` 时按 `runs` 预执行）：
+数据集内 `审查模板.yaml` 提供三类典型流水线（`--with-review` 时按 `runs` 逐迭代提交并执行）：
 
 | 模板编码 | 拓扑 | 演示语义 |
 | --- | --- | --- |
@@ -127,16 +130,18 @@ examples/
 | `AXLE-REVIEW-PARALLEL` | 并行双仿真（shaft-sim 与 column-sim 同层无依赖） | 并行层展示：两作业同层并列，均通过后汇总 `success` |
 | `AXLE-REVIEW-GATED` | 规则门禁 + 下游仿真（默认停用） | 门禁语义：当前迭代存在 error 级发现项，规则检查判 `failure`，下游两级仿真 `skipped` |
 
-运行视图（前端「审查流水线」Tab）支持 GitHub Actions 风格展示：作业树按 needs 层级缩进、
-运行中实时进度与日志流（WebSocket 推送）、作业详情含发现项标注与仿真指标判定表。
+运行视图（前端「审查流水线」Tab）支持 GitHub Actions 风格展示：提交方案分组运行列表、
+作业树按 needs 层级缩进并可展开平台内置步骤（setup / check / report 或 setup / solve / evaluate）、
+步骤日志带相对时间戳与「仅看错误」过滤、运行中实时进度与日志流（WebSocket 推送）、
+作业详情含发现项标注与仿真指标判定表。
 
 ### 产物实体文件（上传用）
 
 | 文件 | 类别 | 说明 |
 | --- | --- | --- |
-| `DRW-300_revA.dxf` | drawing | 迭代 1 归档总图（基线快照对象，不参与迭代 2 检查） |
-| `SHF-301_revA.step` | model | 合规基准；SHAFT 系列仿真绑定对象 |
-| `COL-301_revA.step` | model | 合规基准；COL 系列仿真绑定对象 |
+| `DRW-300_revA.dxf` | drawing | 迭代 1 归档总图（归档对象，不参与迭代 2 检查） |
+| `SHF-301_revA.step` | model | 合规基准；SHAFT 系列仿真引用对象 |
+| `COL-301_revA.step` | model | 合规基准；COL 系列仿真引用对象 |
 | `CAL-301_revA.csv` | result | 传动轴扭转计算书（合规） |
 | `CAL-302_revA.csv` | result | **边界数据**：重量kg 误登记为 3200 超出上限，触发 RANGE-301 |
 | `SPC-301_revA.md` | spec | **边界数据**：缺校核者会签，触发 PROC-301 |
@@ -151,7 +156,7 @@ examples/
   扩展名不在白名单 1 条（warning）、缺校核者 1 条（info）。
 - 仿真：`SHAFT-NOMINAL-CHECK`（800N·m）`pass`；`SHAFT-OVERLOAD-CHECK`（1500N·m）三项全部超阈 `fail`；
   `COL-STABILITY-CHECK`（标准段）`pass`；`COL-SLENDER-CHECK`（细长杆）仅安全系数超阈 `fail`。
-- 完整基线见 `预期检查结果.json`。
+- 完整预期见 `预期检查结果.json`。
 
 ## 数据集：编码与参数边界数据
 
@@ -167,20 +172,21 @@ examples/
 | --- | --- |
 | `项目结构.json` | 项目树、成员角色、迭代（含 planned 状态不被推进） |
 | `规则库.json` | 规则条目：含 `enabled=false` 停用规则与未注册 checker_type 停用规则（依赖前提见条目描述） |
-| `规则集.json` | 规则集成员（含停用规则）与迭代绑定关系 |
+| `规则集.json` | 规则集成员（含停用规则，经审查模板引用生效） |
 | `仿真模板.json` | 正常对照（pass）/ 零扭矩非法参数（作业 failed）/ μ=2.0 压杆（单指标 fail）三类模板 |
+| `审查模板.yaml` | 审查流水线编排（rules 门禁 + 三类边界工况仿真） |
 | `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
 | `产物元数据.csv` | 各产物版本的元数据（含恰好等于上下限的边界值与非数值文本样本） |
 | `边界场景说明.csv` | 边界场景清单：编号、类别、数据特征、预期表现 |
 | `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
-| `预期检查结果.json` | 自检基线：检查汇总、发现项与三类仿真结论（含 failed 作业）的期望值 |
+| `预期检查结果.json` | 预期结果：检查汇总、发现项与三类仿真结论（含 failed 作业）的期望值 |
 
 ### 产物实体文件（上传用）
 
 | 文件 | 类别 | 说明 |
 | --- | --- | --- |
-| `RND-401_revA.step` | model | 合规基准数据（重量kg=500 恰好等于上限判定通过；元数据含数值与布尔字段）；SHAFT 系列仿真绑定对象 |
-| `rnd-402_revA.step` | model | **边界数据**：小写产物编码，触发 BND-CODE-401；COL 系列仿真绑定对象 |
+| `RND-401_revA.step` | model | 合规基准数据（重量kg=500 恰好等于上限判定通过；元数据含数值与布尔字段）；SHAFT 系列仿真引用对象 |
+| `rnd-402_revA.step` | model | **边界数据**：小写产物编码，触发 BND-CODE-401；COL 系列仿真引用对象 |
 | `RND403_revA.dwg` | drawing | **边界数据**：缺连字符产物编码，触发 BND-CODE-401 |
 | `CAL-401_revA.csv` | result | **边界数据**：重量kg 误填中文文本「约4.2」，触发 BND-RANGE-401 类型错误 |
 | `RND-404_revA.STEP` | model | **边界数据**：大写扩展名（大小写不敏感判定通过）；重量kg=0.1 恰好等于下限判定通过 |
@@ -195,37 +201,37 @@ examples/
 - 仿真：`BND-SHAFT-PASS-CHECK`（300N·m）`pass`；
   `BND-SHAFT-EDGE-CHECK`（零扭矩）求解器参数校验失败，作业 `status=failed` 且无指标输出；
   `BND-COL-EDGE-CHECK`（μ=2.0 一端固定一端自由，临界力折减 4 倍）仅安全系数超阈 `fail`。
-- 完整基线见 `预期检查结果.json`。
+- 完整预期见 `预期检查结果.json`。
 
 ## 使用方式
 
 ### 1. 载入示例数据
 
 ```bash
-# 载入到 .iterd-example 数据目录（默认库 .iterd-example/iterd.db）
-uv run python scripts/load_example.py --with-check --with-sim
+# 载入到 .iterd-example 数据目录并预执行审查流水线（默认库 .iterd-example/iterd.db）
+uv run python scripts/load_example.py --with-review
+
+# 仅载入结构化数据（不触发流水线）
+uv run python scripts/load_example.py
 
 # 指定数据目录与数据库
-uv run python scripts/load_example.py --data-dir .iterd-example --with-check
+uv run python scripts/load_example.py --data-dir .iterd-example --with-review
 
 # 载入指定数据集
 uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机机架结构设计
 
-# 载入边界异常数据集（完整链路：检查 + 仿真）
-uv run python scripts/load_example.py --dataset examples/datasets/项目-边界异常数据 --with-check --with-sim
-
-# 载入传动轴与立柱设计数据集（新检查器/求解器完整链路）
-uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机传动轴与立柱设计 --with-check --with-sim
-
-# 载入传动轴数据集并预执行审查流水线（串行全绿 AXLE-REVIEW + 并行双仿真 AXLE-REVIEW-PARALLEL）
-uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机传动轴与立柱设计 --with-check --with-sim --with-workflow
+# 载入传动轴与立柱设计数据集并预执行审查流水线
+# （串行全绿 AXLE-REVIEW + 并行双仿真 AXLE-REVIEW-PARALLEL，GATED 默认停用不触发）
+uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机传动轴与立柱设计 --with-review
 
 # 载入编码与参数边界数据集（含停用规则与非法参数仿真边界）
-uv run python scripts/load_example.py --dataset examples/datasets/项目-编码与参数边界数据 --with-check --with-sim
+uv run python scripts/load_example.py --dataset examples/datasets/项目-编码与参数边界数据 --with-review
 ```
 
-脚本幂等：项目/规则/规则集/仿真模板按编码或名称跳过已存在记录。
-`--with-check` / `--with-sim` 会启动进程内 worker 执行规则检查与仿真并等待终态。
+脚本幂等：项目/规则/规则集/仿真模板/审查模板按编码或名称跳过已存在记录。
+`--with-review` 按各数据集 `审查模板.yaml` 的 `runs` 节逐迭代提交方案、
+启动进程内 worker 执行流水线并等待终态，逐作业打印检查汇总与仿真结论，供与
+`预期检查结果.json` 比对。
 
 载入后启动服务查看：`uv run iterd serve`，默认管理员 `admin / admin1234`，
 演示用户 `designer / designer123`、`reviewer / reviewer123`。

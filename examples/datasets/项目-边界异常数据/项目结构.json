@@ -1,5 +1,5 @@
 {
-    "_comment": "某型带式输送机托辊组件开发 —— 边界与异常场景种子数据。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py --dataset 载入。本数据集专用于覆盖规则检查的类型校验、禁用规则、planned 迭代、viewer 成员与子项目基线等边界场景。",
+    "_comment": "某型带式输送机托辊组件开发 —— 边界与异常场景种子数据。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py --dataset 载入。本数据集专用于覆盖规则检查的类型校验、禁用规则、planned 迭代与 viewer 成员等边界场景。",
     "project": {
         "code": "TRL-2026",
         "name": "某型带式输送机托辊组件开发",
@@ -10,7 +10,7 @@
         {
             "code": "TRL-2026-ROLL",
             "name": "辊筒组件子项",
-            "description": "辊筒轴、轴承座等转动部件设计（验证父项目角色继承与子项目基线）。",
+            "description": "辊筒轴、轴承座等转动部件设计（验证父项目角色继承）。",
             "status": "active",
             "parent_code": "TRL-2026"
         }
@@ -60,17 +60,10 @@
             "number": 1,
             "project_code": "TRL-2026-ROLL",
             "title": "辊筒轴详细设计",
-            "objective": "子项目独立迭代，承载辊筒轴仿真校核模板与无产物基线",
+            "objective": "子项目独立迭代，承载辊筒轴仿真校核模板",
             "start_date": "2026-09-20",
             "end_date": "2026-10-25",
             "status": "active"
-        }
-    ],
-    "baselines": [
-        {
-            "project_code": "TRL-2026-ROLL",
-            "iteration_number": 1,
-            "name": "BL-辊筒轴详设基线"
         }
     ]
 }

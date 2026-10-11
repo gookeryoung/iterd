@@ -17,7 +17,14 @@ from iterd.plugins.workflows.definition import (
     parse_definition,
     topo_layers,
 )
-from iterd.plugins.workflows.models import WorkflowJob, WorkflowRun, WorkflowTemplate
+from iterd.plugins.workflows.models import (
+    JOB_STEP_SEQUENCES,
+    IterationSubmission,
+    WorkflowJob,
+    WorkflowJobStep,
+    WorkflowRun,
+    WorkflowTemplate,
+)
 
 
 def _validated(text: str) -> WorkflowDefinition:
@@ -194,8 +201,10 @@ async def _create_run_from(  # noqa: PLR0913 - 快照发起参数
     workflow_code: str,
     definition_text: str,
     action: str,
+    trigger: str = "manual",
+    submission_id: int | None = None,
 ) -> tuple[WorkflowRun, Any]:
-    """以给定定义文本发起运行：快照固化 + 逐 job 引用解析 + Task 创建（同事务）。"""
+    """以给定定义文本发起运行：快照固化 + 逐 job 引用解析 + 步骤生成 + Task 创建（同事务）。"""
     from iterd.plugins.projects.models import Iteration
     from iterd.tasks.models import Task
 
@@ -209,29 +218,46 @@ async def _create_run_from(  # noqa: PLR0913 - 快照发起参数
         definition=definition_text,
         status="pending",
         created_by=actor_id,
+        submission_id=submission_id,
+        trigger=trigger,
     )
     session.add(run)
     await session.flush()
 
     job_map = definition.job_map()
     order = 0
+    created_jobs: list[WorkflowJob] = []
     for layer in topo_layers(definition):
         for key in layer:
             job_def = job_map[key]
             config = await _resolve_job_config(session, job=job_def, iteration_id=iteration_id)
+            job = WorkflowJob(
+                run_id=run.id,
+                job_key=key,
+                name=job_def.name,
+                job_type=job_def.uses.split("/")[0],
+                needs=job_def.needs,
+                config=config,
+                status="pending",
+                order_index=order,
+            )
+            session.add(job)
+            created_jobs.append(job)
+            order += 1
+    await session.flush()
+
+    # 平台内置步骤序列：作业创建时同步生成（全 pending）
+    for job in created_jobs:
+        for step_index, (step_key, step_name) in enumerate(JOB_STEP_SEQUENCES.get(job.job_type, ())):
             session.add(
-                WorkflowJob(
-                    run_id=run.id,
-                    job_key=key,
-                    name=job_def.name,
-                    job_type=job_def.uses.split("/")[0],
-                    needs=job_def.needs,
-                    config=config,
+                WorkflowJobStep(
+                    job_id=job.id,
+                    step_key=step_key,
+                    name=step_name,
                     status="pending",
-                    order_index=order,
+                    order_index=step_index,
                 )
             )
-            order += 1
     await session.flush()
 
     task = Task(task_type="workflow_run", payload={"workflow_run_id": run.id}, status="pending")
@@ -268,7 +294,7 @@ async def create_workflow_run(
 
 
 async def rerun_workflow_run(session: AsyncSession, *, actor_id: int, run: WorkflowRun) -> tuple[WorkflowRun, Any]:
-    """以运行快照重新执行（生成新 run，对齐 GitHub Re-run 新 attempt 语义）。"""
+    """以运行快照重新执行（生成新 run，对齐 GitHub Re-run 新 attempt 语义；继承提交归属）。"""
     return await _create_run_from(
         session,
         actor_id=actor_id,
@@ -277,6 +303,87 @@ async def rerun_workflow_run(session: AsyncSession, *, actor_id: int, run: Workf
         workflow_code=run.workflow_code,
         definition_text=run.definition,
         action="workflow_run.rerun",
+        trigger="rerun",
+        submission_id=run.submission_id,
+    )
+
+
+# ---- 提交方案 ----
+
+
+async def create_submission(
+    session: AsyncSession, *, actor_id: int, iteration_id: int, title: str, note: str
+) -> tuple[IterationSubmission, list[WorkflowRun]]:
+    """提交迭代方案：为项目可见的每个启用模板各创建一条运行（trigger=submission）."""
+    from iterd.plugins.projects.models import Iteration
+    from iterd.plugins.trace import register
+
+    iteration = await session.get(Iteration, iteration_id)
+    if iteration is None:
+        raise not_found(f"迭代不存在: {iteration_id}")
+    if iteration.status != "active":
+        raise IterdError(
+            f"迭代状态为 {iteration.status}，仅 active 迭代可提交方案",
+            code="ITERD-INVALID_STATE",
+            status_code=422,
+        )
+    submission = IterationSubmission(iteration_id=iteration_id, title=title, note=note, submitted_by=actor_id)
+    session.add(submission)
+    await session.flush()
+    await register(
+        session,
+        node_type="submission",
+        ref_table="iteration_submissions",
+        ref_id=submission.id,
+        display_name=f"{iteration.title} · {title}",
+    )
+    await audit(
+        session,
+        actor_id=actor_id,
+        actor_name="",
+        action="submission.create",
+        resource_type="iteration_submission",
+        resource_id=submission.id,
+        after={"iteration_id": iteration_id, "title": title},
+    )
+    templates = [
+        template for template in await list_templates(session, project_id=iteration.project_id) if template.enabled
+    ]
+    runs: list[WorkflowRun] = []
+    for template in templates:
+        run, _task = await _create_run_from(
+            session,
+            actor_id=actor_id,
+            iteration_id=iteration_id,
+            workflow_id=template.id,
+            workflow_code=template.code,
+            definition_text=template.definition,
+            action="workflow_run.create",
+            trigger="submission",
+            submission_id=submission.id,
+        )
+        runs.append(run)
+    return submission, runs
+
+
+async def get_submission(session: AsyncSession, submission_id: int) -> IterationSubmission:
+    """取提交方案，不存在抛 404."""
+    submission = await session.get(IterationSubmission, submission_id)
+    if submission is None:
+        raise not_found(f"提交方案不存在: {submission_id}")
+    return submission
+
+
+async def list_submissions(session: AsyncSession, *, iteration_id: int) -> list[IterationSubmission]:
+    """迭代下提交方案列表（按 id 降序，最近提交在前）。"""
+    return list(
+        (
+            await session.execute(
+                select(IterationSubmission)
+                .where(IterationSubmission.iteration_id == iteration_id)
+                .order_by(IterationSubmission.id.desc())
+            )
+        ).scalars()
     )
 
 
@@ -389,46 +496,112 @@ async def job_display_map(session: AsyncSession, jobs: list[WorkflowJob]) -> dic
 # ---- 编排执行（worker 侧）----
 
 
+def _step_ts(job: WorkflowJob) -> float:
+    """日志行相对时间戳：相对作业开始时刻的秒数（顺序调用保证非降序）."""
+    started = job.started_at
+    if started is None:
+        return 0.0
+    if started.tzinfo is None:  # SQLite 读回 naive，按 UTC 归一
+        started = started.replace(tzinfo=UTC)
+    return round(max((datetime.now(UTC) - started).total_seconds(), 0.0), 3)
+
+
 def _append_log(job: WorkflowJob, level: str, message: str) -> None:
-    """追加作业日志（JSON 字段整体重赋值以触发脏检测）。"""
-    job.logs = [*(job.logs or []), {"level": level, "message": message}]
+    """追加作业级日志（生命周期事件；JSON 字段整体重赋值以触发脏检测）。"""
+    job.logs = [*(job.logs or []), {"ts": _step_ts(job), "level": level, "message": message}]
+
+
+def _append_step_log(step: WorkflowJobStep, job: WorkflowJob, level: str, message: str) -> None:
+    """追加步骤日志（ts 为相对作业开始秒数）。"""
+    step.logs = [*(step.logs or []), {"ts": _step_ts(job), "level": level, "message": message}]
+
+
+async def job_steps(session: AsyncSession, *, job_ids: list[int]) -> dict[int, list[WorkflowJobStep]]:
+    """批量取作业步骤（按 job 分组，order_index 升序）。"""
+    if not job_ids:
+        return {}
+    grouped: dict[int, list[WorkflowJobStep]] = {}
+    rows = (
+        await session.execute(
+            select(WorkflowJobStep)
+            .where(WorkflowJobStep.job_id.in_(job_ids))
+            .order_by(WorkflowJobStep.job_id, WorkflowJobStep.order_index)
+        )
+    ).scalars()
+    for step in rows:
+        grouped.setdefault(int(step.job_id), []).append(step)
+    return grouped
+
+
+async def _start_step(session: AsyncSession, step: WorkflowJobStep) -> None:
+    """步骤进入 running（先行提交，异常兜底可定位失败步骤）。"""
+    step.status = "running"
+    step.started_at = datetime.now(UTC)
+    await session.commit()
+
+
+def _finish_step(step: WorkflowJobStep, *, conclusion: str) -> None:
+    """步骤执行完毕（report/evaluate 判定 failure 时 status 仍为 succeeded，红 X 落在 conclusion）。"""
+    step.status = "succeeded"
+    step.conclusion = conclusion
+    step.finished_at = datetime.now(UTC)
 
 
 async def _run_rules_job(session: AsyncSession, *, run: WorkflowRun, job: WorkflowJob) -> None:
-    """静态规则检查作业：直建 CheckRun（不建 Task，避免嵌套调度）+ 复用 execute_check_run."""
+    """静态规则检查作业：setup（解析配置建 CheckRun）→ check（执行）→ report（判定结论）."""
     from iterd.plugins.rules import services as rule_services
     from iterd.plugins.rules.models import CheckRun, RuleSet
 
+    steps = {s.step_key: s for s in (await job_steps(session, job_ids=[int(job.id)])).get(int(job.id), [])}
+    setup, check, report = steps["setup"], steps["check"], steps["report"]
     config = job.config or {}
+
+    # setup：解析配置（规则集解析与固化）
+    await _start_step(session, setup)
     rule_set = await session.get(RuleSet, int(config["rule_set_id"]))
+    if rule_set is None:
+        raise IterdError(f"规则集不存在: {config['rule_set_id']}", code="ITERD-INVALID_STATE", status_code=422)
     check_run = CheckRun(iteration_id=run.iteration_id, rule_set_id=int(config["rule_set_id"]), status="pending")
     session.add(check_run)
     await session.flush()
     job.check_run_id = int(check_run.id)
-    _append_log(
-        job, "info", f"规则集 {rule_set.name if rule_set else config['rule_set_id']} → 检查运行 #{check_run.id}"
-    )
+    _append_step_log(setup, job, "info", f"规则集 {rule_set.name} → 检查运行 #{check_run.id}")
+    _finish_step(setup, conclusion="success")
     await session.commit()
 
+    # check：执行规则检查
+    await _start_step(session, check)
     summary = await rule_services.execute_check_run(session, check_run_id=int(check_run.id))
     errors = int((summary or {}).get("error") or 0)
     warnings = int((summary or {}).get("warning") or 0)
     infos = int((summary or {}).get("info") or 0)
-    _append_log(job, "info", f"发现项 error={errors} warning={warnings} info={infos}")
-    job.status = "succeeded"
-    job.conclusion = "success" if errors == 0 else "failure"
+    _append_step_log(check, job, "info", f"发现项 error={errors} warning={warnings} info={infos}")
+    _finish_step(check, conclusion="success")
+    await session.commit()
+
+    # report：判定结论（error>0 → failure，红 X 落在本步骤）
+    await _start_step(session, report)
+    conclusion = "success" if errors == 0 else "failure"
     if errors > 0:
-        _append_log(job, "error", f"存在 {errors} 条 error 级发现项，作业判定为 failure")
+        _append_step_log(report, job, "error", f"存在 {errors} 条 error 级发现项，判定为 failure")
+    _finish_step(report, conclusion=conclusion)
+    job.status = "succeeded"
+    job.conclusion = conclusion
     job.finished_at = datetime.now(UTC)
     await session.commit()
 
 
 async def _run_simulation_job(session: AsyncSession, *, run: WorkflowRun, job: WorkflowJob) -> None:
-    """动态仿真作业：直建 SimJob（不建 Task）+ 复用 execute_sim_job."""
+    """动态仿真作业：setup（解析配置建 SimJob）→ solve（执行仿真）→ evaluate（阈值判定）."""
     from iterd.plugins.simulation import services as sim_services
     from iterd.plugins.simulation.models import SimJob, SimTemplate
 
+    steps = {s.step_key: s for s in (await job_steps(session, job_ids=[int(job.id)])).get(int(job.id), [])}
+    setup, solve, evaluate = steps["setup"], steps["solve"], steps["evaluate"]
     config = job.config or {}
+
+    # setup：解析配置（模板/产物版本）
+    await _start_step(session, setup)
     template = await session.get(SimTemplate, int(config["template_id"]))
     sim_job = SimJob(
         iteration_id=run.iteration_id,
@@ -442,22 +615,55 @@ async def _run_simulation_job(session: AsyncSession, *, run: WorkflowRun, job: W
     await session.flush()
     job.sim_job_id = int(sim_job.id)
     label = f"{template.code} {template.name}" if template else str(config["template_id"])
-    _append_log(job, "info", f"仿真模板 {label} → 仿真作业 #{sim_job.id}")
+    _append_step_log(setup, job, "info", f"仿真模板 {label} → 仿真作业 #{sim_job.id}")
+    _finish_step(setup, conclusion="success")
     await session.commit()
 
+    # solve：执行仿真
+    await _start_step(session, solve)
     summary = await sim_services.execute_sim_job(session, job_id=int(sim_job.id))
     verdict = str((summary or {}).get("verdict") or "fail")
-    _append_log(job, "info", f"求解完成 verdict={verdict} failures={(summary or {}).get('failures', 0)}")
-    job.status = "succeeded"
-    job.conclusion = "success" if verdict == "pass" else "failure"
+    _append_step_log(solve, job, "info", f"求解完成 verdict={verdict} failures={(summary or {}).get('failures', 0)}")
+    _finish_step(solve, conclusion="success")
+    await session.commit()
+
+    # evaluate：阈值判定（verdict=fail → failure，红 X 落在本步骤）
+    await _start_step(session, evaluate)
+    conclusion = "success" if verdict == "pass" else "failure"
     if verdict != "pass":
-        _append_log(job, "error", "存在超阈指标，作业判定为 failure")
+        _append_step_log(
+            evaluate, job, "error", f"存在超阈指标（failures={(summary or {}).get('failures', 0)}），判定为 failure"
+        )
+    _finish_step(evaluate, conclusion=conclusion)
+    job.status = "succeeded"
+    job.conclusion = conclusion
     job.finished_at = datetime.now(UTC)
     await session.commit()
 
 
+async def _fail_running_step(session: AsyncSession, job: WorkflowJob, exc: Exception) -> None:
+    """作业异常兜底：running 步骤置 failed + error 日志，未执行步骤 skipped，作业置 failure."""
+    steps = (await job_steps(session, job_ids=[int(job.id)])).get(int(job.id), [])
+    for step in steps:
+        if step.status == "running":
+            step.status = "failed"
+            step.conclusion = "failure"
+            step.finished_at = datetime.now(UTC)
+            _append_step_log(step, job, "error", f"执行异常: {type(exc).__name__}: {exc}"[:500])
+        elif step.status == "pending":
+            step.status = "skipped"
+            step.conclusion = "skipped"
+    job.status = "failed"
+    job.conclusion = "failure"
+    job.finished_at = datetime.now(UTC)
+    _append_log(job, "error", f"作业失败: {type(exc).__name__}: {exc}"[:500])
+    await _mark_bound_failure(session, job)
+    await session.commit()
+
+
 async def _execute_job(session: AsyncSession, *, run: WorkflowRun, job: WorkflowJob) -> None:
-    """执行单作业：异常捕获记 failure 并继续（不中断整链）。"""
+    """执行单作业：步骤化推进；异常兜底记 failure 并继续（不中断整链）."""
+    job_id = int(job.id)  # 固化主键：rollback 后实例过期，禁止再访问 job.id
     job.status = "running"
     job.started_at = datetime.now(UTC)
     await session.commit()
@@ -468,14 +674,9 @@ async def _execute_job(session: AsyncSession, *, run: WorkflowRun, job: Workflow
             await _run_simulation_job(session, run=run, job=job)
     except Exception as exc:
         await session.rollback()
-        failed = await session.get(WorkflowJob, job.id)
+        failed = await session.get(WorkflowJob, job_id)
         if failed is not None:
-            failed.status = "failed"
-            failed.conclusion = "failure"
-            failed.finished_at = datetime.now(UTC)
-            _append_log(failed, "error", f"执行异常: {type(exc).__name__}: {exc}"[:500])
-            await _mark_bound_failure(session, failed)
-            await session.commit()
+            await _fail_running_step(session, failed, exc)
 
 
 async def _mark_bound_failure(session: AsyncSession, job: WorkflowJob) -> None:
@@ -542,30 +743,42 @@ async def execute_workflow_run(
     await session.commit()
 
     jobs = await list_jobs(session, run_id=run_id)
-    job_map = {job.job_key: job for job in jobs}
+    job_ids = {job.job_key: int(job.id) for job in jobs}
     total = max(len(jobs), 1)
     done = 0
+    conclusions: dict[str, str | None] = {}
     for layer in layers:
         for key in layer:
-            job = job_map.get(key)
+            if key not in job_ids:
+                continue
+            # 每次迭代重新载入：上游作业异常 rollback 会过期 identity map 中的实例
+            job = await session.get(WorkflowJob, job_ids[key])
             if job is None:
                 continue
-            needs = job.needs or []
-            if any(job_map[dep].conclusion != "success" for dep in needs if dep in job_map):
+            needs = list(job.needs or [])
+            if any(conclusions.get(dep) != "success" for dep in needs if dep in conclusions):
                 job.status = "skipped"
                 job.conclusion = "skipped"
                 _append_log(job, "warning", "上游作业未通过，本作业跳过")
+                for step in (await job_steps(session, job_ids=[job_ids[key]])).get(job_ids[key], []):
+                    step.status = "skipped"
+                    step.conclusion = "skipped"
                 await session.commit()
+                conclusions[key] = "skipped"
                 done += 1
                 if progress is not None:
                     progress(f"作业 {job.name}", int(100 * done / total))
                 continue
             if log is not None:
                 log("info", f"执行作业 {job.name}")
-            await _execute_job(session, run=run, job=job)
+            current = await session.get(WorkflowRun, run_id)  # 刷新 run：防上游 rollback 过期
+            if current is not None:
+                await _execute_job(session, run=current, job=job)
             done += 1
             if progress is not None:
                 progress(f"作业 {job.name}", int(100 * done / total))
+            refreshed = await session.get(WorkflowJob, job_ids[key])
+            conclusions[key] = refreshed.conclusion if refreshed is not None else None
 
     jobs = await list_jobs(session, run_id=run_id)
     summary = await _aggregate_summary(session, jobs)

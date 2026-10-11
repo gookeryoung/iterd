@@ -1,5 +1,5 @@
 {
-  "_comment": "示例数据自检基线：载入本数据集后对「TRL-2026 迭代 1」执行「托辊边界检查集」检查，CheckRun.summary 应与 expected_summary 一致（停用规则 NAME-004 不产生发现项且不计入 rules）；仿真作业按 expected_simulations 发起（模板 + 绑定产物）。挠度为长小数，基线仅给判定结论与三位近似值。",
+  "_comment": "示例数据预期结果：审查流水线 rules/check 作业产出的 CheckRun.summary 应与 expected_summary 一致（停用规则 NAME-004 不产生发现项且不计入 rules）；流水线覆盖的仿真作业 verdict 与 failed_keys 用于核对结果页展示。挠度为长小数，本文件仅给判定结论与三位近似值。",
   "iteration": {
     "project_code": "TRL-2026",
     "number": 1

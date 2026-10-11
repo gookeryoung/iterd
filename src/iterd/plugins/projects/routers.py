@@ -1,4 +1,4 @@
-"""projects 路由：项目树 / 成员 / 迭代 / 基线."""
+"""projects 路由：项目树 / 成员 / 迭代."""
 
 from __future__ import annotations
 
@@ -169,52 +169,3 @@ async def update_iteration(
     updated = await services.update_iteration(session, actor_id=user.id, iteration=iteration, fields=fields)
     await session.commit()
     return schemas.IterationOut.model_validate(updated)
-
-
-# ---- 基线 ----
-
-
-@router.get("/iterations/{iteration_id}/baselines", response_model=list[schemas.BaselineOut])
-async def list_baselines(iteration_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.BaselineOut]:
-    """迭代下基线列表（viewer+）。"""
-    iteration = await services.get_iteration(session, iteration_id)
-    await rbac.require_project_role(
-        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
-    )
-    baselines = await services.list_baselines(session, iteration_id)
-    return [schemas.BaselineOut.model_validate(b) for b in baselines]
-
-
-@router.post("/iterations/{iteration_id}/baselines", response_model=schemas.BaselineDetailOut, status_code=201)
-async def create_baseline(
-    iteration_id: int, body: schemas.BaselineIn, user: CurrentUser, session: SessionDep
-) -> schemas.BaselineDetailOut:
-    """建立基线（reviewer+）：锁定迭代内全部产物当前版本。"""
-    iteration = await services.get_iteration(session, iteration_id)
-    await rbac.require_project_role(session, iteration.project_id, user.id, "reviewer", is_superuser=user.is_superuser)
-    baseline = await services.create_baseline(session, actor_id=user.id, iteration_id=iteration_id, name=body.name)
-    items = await services.get_baseline_items(session, baseline.id)
-    await session.commit()
-    out = schemas.BaselineDetailOut.model_validate(baseline)
-    out.items = [schemas.BaselineItemOut.model_validate(i) for i in items]
-    return out
-
-
-@router.get("/baselines/{baseline_id}", response_model=schemas.BaselineDetailOut)
-async def get_baseline(baseline_id: int, user: CurrentUser, session: SessionDep) -> schemas.BaselineDetailOut:
-    """基线详情（含快照条目）。"""
-    from iterd.plugins.projects.models import Baseline
-
-    baseline = await session.get(Baseline, baseline_id)
-    if baseline is None:
-        from iterd.core.errors import not_found
-
-        raise not_found(f"基线不存在: {baseline_id}")
-    iteration = await services.get_iteration(session, baseline.iteration_id)
-    await rbac.require_project_role(
-        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
-    )
-    items = await services.get_baseline_items(session, baseline.id)
-    out = schemas.BaselineDetailOut.model_validate(baseline)
-    out.items = [schemas.BaselineItemOut.model_validate(i) for i in items]
-    return out

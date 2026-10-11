@@ -1,5 +1,5 @@
 {
-  "_comment": "规则集与迭代绑定种子数据。project_code 为 null 表示全局规则集；rule_codes 引用 规则库.json 中的 code；BND-NAME-404 / BND-CHK-405 为停用规则，纳入规则集但不参与检查执行。",
+  "_comment": "规则集种子数据。project_code 为 null 表示全局规则集；rule_codes 引用 规则库.json 中的 code；BND-NAME-404 / BND-CHK-405 为停用规则，纳入规则集但不参与检查执行；规则集经审查模板 rules/check 作业的 with.rule_set 引用生效。",
   "rule_sets": [
     {
       "name": "编码与参数边界检查集",
@@ -7,8 +7,5 @@
       "description": "覆盖编码规范、重量数值范围、格式白名单三类检查，另含两条停用规则验证跳过与计数逻辑",
       "rule_codes": ["BND-CODE-401", "BND-RANGE-401", "BND-EXT-401", "BND-NAME-404", "BND-CHK-405"]
     }
-  ],
-  "bindings": [
-    { "project_code": "BND-2026", "iteration_number": 1, "rule_set_name": "编码与参数边界检查集" }
   ]
 }

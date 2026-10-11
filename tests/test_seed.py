@@ -27,6 +27,7 @@ def store(env: Path) -> Generator[tuple[async_sessionmaker[AsyncSession], dict[s
     from iterd.plugins.rules import models as rules_models  # noqa: F401
     from iterd.plugins.simulation import models as simulation_models  # noqa: F401
     from iterd.plugins.trace import models as trace_models  # noqa: F401
+    from iterd.plugins.workflows import models as workflows_models  # noqa: F401
     from iterd.tasks import models as task_models  # noqa: F401
 
     engine = get_engine(get_settings().database_url)
@@ -67,23 +68,26 @@ def _rows(stmt: Any) -> list[Any]:
 def test_seed_demo_flow_content(
     store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
 ) -> None:
-    """seed 后演示全流程内容齐备：账号 / 规则集 / 绑定 / 迭代激活 / 基线 / 检查运行."""
+    """seed 后演示全流程内容齐备：账号 / 规则集 / 迭代激活 / 演示模板 / 提交方案与运行."""
     _maker, summary, _second = store
 
-    # 首次 seed 摘要：全流程内容全部新建
+    # 首次 seed 摘要：全流程内容全部新建，提交方案已触发运行
     flow = summary["demo_flow"]
     assert flow["rule_set"] is True
-    assert flow["binding"] is True
     assert flow["activated"] is True
-    assert flow["baseline"] is True
-    assert flow["check_run_id"] is not None
+    assert flow["sim_template"] is True
+    assert flow["workflow"] is True
+    assert flow["submission_id"] is not None
+    assert flow["runs"] >= 1
 
     # 账号：三员 + 普通用户（含 reviewer）
     names = {u["username"] for u in summary["users"]}
     assert {"sec_admin", "audit_admin", "designer", "reviewer", "demo"} <= names
 
     # 项目 / 迭代：首轮迭代已激活，另有规划态迭代供演示状态流转
-    from iterd.plugins.projects.models import Baseline, Iteration, Project
+    from iterd.plugins.projects.models import Iteration, Project
+    from iterd.plugins.rules.models import CheckRun, RuleSet
+    from iterd.plugins.workflows.models import WorkflowRun
 
     projects = _rows(select(Project))
     demo = next(p for p in projects if p.code == "DEMO")
@@ -92,51 +96,41 @@ def test_seed_demo_flow_content(
     assert iters[0].status == "active"
     assert iters[1].status == "planned"
 
-    # 演示规则集（项目级）与首个迭代绑定
-    from iterd.plugins.rules.models import RuleSet, RuleSetBinding
-
+    # 演示规则集（项目级）供规则检查作业引用
     sets = _rows(select(RuleSet))
     demo_set = next(rs for rs in sets if rs.name == "演示规则集")
     assert demo_set.project_id == demo.id
-    bindings = _rows(select(RuleSetBinding))
-    assert any(b.iteration_id == iters[0].id and b.rule_set_id == demo_set.id for b in bindings)
 
-    # 基线
-    baselines = _rows(select(Baseline).where(Baseline.iteration_id == iters[0].id))
-    assert any(b.name == "BL-首轮迭代" for b in baselines)
-
-    # 预置检查运行：已完成且含 DRAFT-001 error 发现项（演示文件名不合规）
-    from iterd.plugins.rules.models import CheckFinding, CheckRun, RuleItem
-
-    runs = _rows(select(CheckRun).where(CheckRun.iteration_id == iters[0].id))
+    # 预置提交方案：运行已触发（trigger=submission）且执行成功
+    runs = _rows(select(WorkflowRun).where(WorkflowRun.iteration_id == iters[0].id))
     assert len(runs) == 1
+    assert runs[0].submission_id == flow["submission_id"]
+    assert runs[0].trigger == "submission"
     assert runs[0].status == "succeeded"
-    assert runs[0].summary is not None
-    assert runs[0].summary["error"] >= 1
-    items = _rows(select(CheckFinding).where(CheckFinding.check_run_id == runs[0].id))
-    assert len(items) >= 1
-    rules = _rows(select(RuleItem))
-    draft = next(r for r in rules if r.code == "DRAFT-001")
-    assert any(f.rule_item_id == draft.id and f.severity == "error" for f in items)
+
+    # 流水线产出的检查运行：演示数据全绿（检查通过，无 error 发现项）
+    checks = _rows(select(CheckRun).where(CheckRun.iteration_id == iters[0].id))
+    assert len(checks) == 1
+    assert checks[0].status == "succeeded"
+    assert checks[0].summary is not None
+    assert checks[0].summary["error"] == 0
 
 
 def test_seed_overwrite_rebuild(
     store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
 ) -> None:
-    """重复 seed 覆盖重建：业务数据清空重建无残留、无重复，账号与审计日志保留."""
+    """重复 seed 覆盖重建：业务数据整体重建（演示流程全部重新生成），账号与审计日志保留."""
     from iterd.plugins.accounts.models import User
     from iterd.plugins.projects.models import Iteration, Project
     from iterd.plugins.rules.models import CheckRun, RuleItem, RuleSet
+    from iterd.plugins.workflows.models import WorkflowRun
 
     _maker, _first, second = store
 
-    # 二次执行摘要：演示流程内容全部重建
+    # 二次执行摘要：覆盖重建后演示流程内容全部重新生成，提交方案与运行随之重建
     flow = second["demo_flow"]
-    assert flow["rule_set"] is True
-    assert flow["binding"] is True
-    assert flow["activated"] is True
-    assert flow["baseline"] is True
-    assert flow["check_run_id"] is not None
+    assert all(flow[key] is True for key in ("rule_set", "activated", "sim_template", "workflow"))
+    assert flow["submission_id"] is not None and flow["runs"] >= 1
     assert all(not u["created"] for u in second["users"])  # 账号沿用，不重复建号
 
     # 无残留无重复：DEMO 项目仅 1 个、演示迭代 2 个、规则编码唯一、规则集仅演示 1 个 + 案例 N 个
@@ -147,14 +141,12 @@ def test_seed_overwrite_rebuild(
     assert len(rule_codes) == len(set(rule_codes))
     assert len(_rows(select(RuleSet))) == len({rs.name for rs in _rows(select(RuleSet))})
 
-    # 演示迭代检查运行重建为 1 次（旧运行已随覆盖清空）
-    from iterd.plugins.projects.models import Iteration as IterationModel
-
-    demo_iters = _rows(
-        select(IterationModel).where(IterationModel.project_id == demo.id).order_by(IterationModel.number)
-    )
-    runs = _rows(select(CheckRun).where(CheckRun.iteration_id == demo_iters[0].id))
+    # 演示迭代运行重建为 1 次（旧运行已随覆盖清空，二次 seed 不新增提交）
+    demo_iters = _rows(select(Iteration).where(Iteration.project_id == demo.id).order_by(Iteration.number))
+    runs = _rows(select(WorkflowRun).where(WorkflowRun.iteration_id == demo_iters[0].id))
     assert len(runs) == 1
+    checks = _rows(select(CheckRun).where(CheckRun.iteration_id == demo_iters[0].id))
+    assert len(checks) == 1
 
     # 用户与审计日志保留
     assert len(_rows(select(User))) >= 6

@@ -1,0 +1,42 @@
+# 审查模板种子数据。definition 为工作流 YAML 文本（GitHub Actions 语法子集：jobs/uses/needs/with）；
+# project_code 为 null 表示全局模板；runs 为 seed 预执行的运行绑定（project_code + iteration_number + workflow_code）。
+# 本数据集覆盖编码与参数边界：规则检查存在 error 级发现项（3 error / 1 warning）；
+# 三个仿真作业与规则检查并行执行（不经 needs 门禁，保证预期 verdict 均可产出）：
+# 扭转校核 pass / 非法参数作业 failed / 压杆边界校核 fail，流水线结论 failure。
+templates:
+  - code: BND-REVIEW
+    name: 编码与参数边界审查流水线
+    project_code: BND-2026
+    description: 静态规则检查（编码与参数边界检查集）与边界工况仿真并行执行；含非法参数作业（status=failed）与压杆安全系数超阈工况
+    definition: |
+      name: 编码与参数边界审查
+      description: 静态规则检查与边界工况仿真并行执行
+
+      jobs:
+        rules-check:
+          name: 静态规则检查
+          uses: rules/check
+          with:
+            rule_set: 编码与参数边界检查集
+        shaft-pass:
+          name: 传动轴扭转校核（边界通过）
+          uses: simulation/run
+          with:
+            template: BND-SHAFT-PASS-CHECK
+            artifact: RND-401
+        shaft-edge:
+          name: 传动轴扭转校核（非法参数）
+          uses: simulation/run
+          with:
+            template: BND-SHAFT-EDGE-CHECK
+            artifact: RND-401
+        col-edge:
+          name: 立柱稳定性校核（边界超阈）
+          uses: simulation/run
+          with:
+            template: BND-COL-EDGE-CHECK
+            artifact: rnd-402
+runs:
+  - project_code: BND-2026
+    iteration_number: 1
+    workflow_code: BND-REVIEW

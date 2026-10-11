@@ -48,8 +48,5 @@
       "end_date": "2026-10-20",
       "status": "active"
     }
-  ],
-  "baselines": [
-    { "project_code": "CVY-2026", "iteration_number": 1, "name": "BL-概念设计基线" }
   ]
 }

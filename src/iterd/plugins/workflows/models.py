@@ -19,6 +19,13 @@ JOB_TYPES = ("rules", "simulation")
 JOB_STATUSES = ("pending", "running", "succeeded", "failed", "skipped")
 CONCLUSIONS = ("success", "failure", "skipped")
 RUN_STATUSES = ("pending", "running", "succeeded", "failed")
+STEP_STATUSES = ("pending", "running", "succeeded", "failed", "skipped")
+TRIGGERS = ("submission", "manual", "rerun")
+# 平台内置步骤序列：job_type → ((step_key, 步骤名), ...)（作业创建时同步生成）
+JOB_STEP_SEQUENCES: dict[str, tuple[tuple[str, str], ...]] = {
+    "rules": (("setup", "解析配置"), ("check", "执行规则检查"), ("report", "判定结论")),
+    "simulation": (("setup", "解析配置"), ("solve", "执行仿真"), ("evaluate", "阈值判定")),
+}
 
 
 class WorkflowTemplate(Base, TimestampMixin):
@@ -48,8 +55,22 @@ class WorkflowRun(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
     summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    submission_id: Mapped[int | None] = mapped_column(ForeignKey("iteration_submissions.id"), index=True, nullable=True)
+    trigger: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class IterationSubmission(Base, TimestampMixin):
+    """提交方案：设计者提交迭代方案的触发事件（每个启用模板各产生一条运行）。"""
+
+    __tablename__ = "iteration_submissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    iteration_id: Mapped[int] = mapped_column(ForeignKey("iterations.id"), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    note: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    submitted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class WorkflowJob(Base, TimestampMixin):
@@ -73,8 +94,30 @@ class WorkflowJob(Base, TimestampMixin):
     conclusion: Mapped[str | None] = mapped_column(String(16), nullable=True)
     check_run_id: Mapped[int | None] = mapped_column(ForeignKey("check_runs.id"), nullable=True)
     sim_job_id: Mapped[int | None] = mapped_column(ForeignKey("sim_jobs.id"), nullable=True)
-    logs: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
+    logs: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class WorkflowJobStep(Base, TimestampMixin):
+    """流水线步骤：作业内平台内置执行环节（setup/执行/判定 三段）。
+
+    状态机 pending→running→succeeded/failed/skipped；任一步骤 failure → 后续步骤 skipped。
+    logs 行结构 {ts: 相对作业开始秒数, level: info|warning|error, message}。
+    """
+
+    __tablename__ = "workflow_job_steps"
+    __table_args__ = (UniqueConstraint("job_id", "step_key", name="uq_workflow_job_step"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("workflow_jobs.id"), index=True, nullable=False)
+    step_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    conclusion: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    logs: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -82,9 +125,14 @@ class WorkflowJob(Base, TimestampMixin):
 __all__ = [
     "CONCLUSIONS",
     "JOB_STATUSES",
+    "JOB_STEP_SEQUENCES",
     "JOB_TYPES",
     "RUN_STATUSES",
+    "STEP_STATUSES",
+    "TRIGGERS",
+    "IterationSubmission",
     "WorkflowJob",
+    "WorkflowJobStep",
     "WorkflowRun",
     "WorkflowTemplate",
 ]

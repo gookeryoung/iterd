@@ -12,6 +12,7 @@ from iterd.plugins.projects import rbac
 from iterd.plugins.projects import services as project_services
 from iterd.plugins.workflows import schemas, services
 from iterd.plugins.workflows.definition import WorkflowDefinitionError, parse_definition
+from iterd.plugins.workflows.models import IterationSubmission
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
 
@@ -26,17 +27,37 @@ def _job_defs_out(definition_text: str) -> list[schemas.WorkflowJobDefOut]:
 
 
 async def _fill_run_out(session: SessionDep, run: schemas.WorkflowRunOut, run_id: int) -> schemas.WorkflowRunOut:
-    """填充任务 id 与作业概要（含绑定展示字段）。"""
+    """填充任务 id、作业概要（含绑定展示字段）与步骤、提交标题。"""
     run.task_id = await services.get_run_task_id(session, run_id)
     jobs = await services.list_jobs(session, run_id=run_id)
     displays = await services.job_display_map(session, jobs)
+    steps_map = await services.job_steps(session, job_ids=[int(job.id) for job in jobs])
+    if run.submission_id is not None:
+        submission = await session.get(IterationSubmission, run.submission_id)
+        run.submission_title = submission.title if submission is not None else ""
     outs = [schemas.WorkflowJobOut.model_validate(j) for j in jobs]
     for out in outs:
         display = displays.get(out.id, {})
         for key, value in display.items():
             setattr(out, key, value)
+        out.steps = [schemas.WorkflowJobStepOut.model_validate(step) for step in steps_map.get(out.id, [])]
     run.jobs = outs
     return run
+
+
+async def _fill_submission_out(
+    session: SessionDep, submission: schemas.SubmissionOut, *, submission_id: int
+) -> schemas.SubmissionOut:
+    """填充提交方案触发产生的运行概要。"""
+    runs = [
+        run
+        for run in await services.list_runs(session, iteration_id=submission.iteration_id)
+        if run.submission_id == submission_id
+    ]
+    submission.runs = [
+        await _fill_run_out(session, schemas.WorkflowRunOut.model_validate(run), int(run.id)) for run in runs
+    ]
+    return submission
 
 
 # ---- 审查模板 ----
@@ -177,3 +198,52 @@ async def rerun_workflow_run(run_id: int, user: CurrentUser, session: SessionDep
     new_run, _task = await services.rerun_workflow_run(session, actor_id=user.id, run=run)
     await session.commit()
     return await _fill_run_out(session, schemas.WorkflowRunOut.model_validate(new_run), int(new_run.id))
+
+
+# ---- 提交方案 ----
+
+
+@router.post("/iterations/{iteration_id}/submissions", response_model=schemas.SubmissionOut, status_code=202)
+async def create_submission(
+    iteration_id: int, body: schemas.SubmissionIn, user: CurrentUser, session: SessionDep
+) -> schemas.SubmissionOut:
+    """提交迭代方案（designer+）：为每个启用模板各产生一条运行，worker 执行。"""
+    iteration = await project_services.get_iteration(session, iteration_id)
+    await rbac.require_project_role(session, iteration.project_id, user.id, "designer", is_superuser=user.is_superuser)
+    submission, _runs = await services.create_submission(
+        session, actor_id=user.id, iteration_id=iteration_id, title=body.title, note=body.note
+    )
+    await session.commit()
+    return await _fill_submission_out(
+        session, schemas.SubmissionOut.model_validate(submission), submission_id=int(submission.id)
+    )
+
+
+@router.get("/iterations/{iteration_id}/submissions", response_model=list[schemas.SubmissionOut])
+async def list_submissions(iteration_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.SubmissionOut]:
+    """迭代下提交方案列表（viewer+，含各自触发的运行）。"""
+    iteration = await project_services.get_iteration(session, iteration_id)
+    await rbac.require_project_role(
+        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    outs = []
+    for submission in await services.list_submissions(session, iteration_id=iteration_id):
+        outs.append(
+            await _fill_submission_out(
+                session, schemas.SubmissionOut.model_validate(submission), submission_id=int(submission.id)
+            )
+        )
+    return outs
+
+
+@router.get("/submissions/{submission_id}", response_model=schemas.SubmissionOut)
+async def get_submission(submission_id: int, user: CurrentUser, session: SessionDep) -> schemas.SubmissionOut:
+    """提交方案详情（viewer+，含触发的运行）。"""
+    submission = await services.get_submission(session, submission_id)
+    iteration = await project_services.get_iteration(session, submission.iteration_id)
+    await rbac.require_project_role(
+        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    return await _fill_submission_out(
+        session, schemas.SubmissionOut.model_validate(submission), submission_id=submission_id
+    )

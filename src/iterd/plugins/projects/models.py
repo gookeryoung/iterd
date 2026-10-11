@@ -1,4 +1,4 @@
-"""projects 数据模型：projects / project_members / iterations / baselines."""
+"""projects 数据模型：projects / project_members / iterations."""
 
 from __future__ import annotations
 
@@ -54,27 +54,4 @@ class Iteration(Base, TimestampMixin, UidMixin):
     status: Mapped[str] = mapped_column(String(16), default="planned", nullable=False)
 
 
-class Baseline(Base, TimestampMixin, UidMixin):
-    """基线：锁定迭代内产物版本快照."""
-
-    __tablename__ = "baselines"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    iteration_id: Mapped[int] = mapped_column(ForeignKey("iterations.id"), index=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-
-
-class BaselineItem(Base, TimestampMixin):
-    """基线条目：建立后不可变（无 UPDATE 路径）。"""
-
-    __tablename__ = "baseline_items"
-    __table_args__ = (UniqueConstraint("baseline_id", "artifact_id", name="uq_baseline_item"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    baseline_id: Mapped[int] = mapped_column(ForeignKey("baselines.id"), index=True, nullable=False)
-    artifact_id: Mapped[int] = mapped_column(ForeignKey("artifacts.id"), nullable=False)
-    artifact_version_id: Mapped[int] = mapped_column(ForeignKey("artifact_versions.id"), nullable=False)
-
-
-__all__ = ["Baseline", "BaselineItem", "Iteration", "Project", "ProjectMember"]
+__all__ = ["Iteration", "Project", "ProjectMember"]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
 from sqlalchemy import select
 
 from iterd.api.deps import CurrentUser, SessionDep
@@ -84,22 +83,6 @@ async def create_rule_set(body: schemas.RuleSetIn, user: CurrentUser, session: S
     return schemas.RuleSetOut.model_validate(rule_set)
 
 
-class BindBody(BaseModel):
-    """绑定入参（迭代）。"""
-
-    iteration_id: int
-
-
-@router.post("/rule-sets/{rule_set_id}/bind", response_model=schemas.RuleSetOut, status_code=201)
-async def bind_rule_set(rule_set_id: int, body: BindBody, user: CurrentUser, session: SessionDep) -> schemas.RuleSetOut:
-    """绑定规则集到迭代（designer+）。"""
-    iteration = await project_services.get_iteration(session, body.iteration_id)
-    await rbac.require_project_role(session, iteration.project_id, user.id, "designer", is_superuser=user.is_superuser)
-    await services.bind_rule_set(session, actor_id=user.id, rule_set_id=rule_set_id, iteration_id=body.iteration_id)
-    await session.commit()
-    return schemas.RuleSetOut.model_validate(await services.get_rule_set(session, rule_set_id))
-
-
 @router.get("/rule-sets/{rule_set_id}", response_model=schemas.RuleSetDetailOut)
 async def get_rule_set(rule_set_id: int, user: CurrentUser, session: SessionDep) -> schemas.RuleSetDetailOut:
     """规则集详情（含成员规则 id）。"""
@@ -138,35 +121,7 @@ async def add_rules_to_set(
     return out
 
 
-@router.get("/iterations/{iteration_id}/rule-set-binding", response_model=schemas.RuleSetBindingOut)
-async def get_rule_set_binding(iteration_id: int, user: CurrentUser, session: SessionDep) -> schemas.RuleSetBindingOut:
-    """查询迭代已绑定的规则集（viewer+，未绑定返回 null）。"""
-    iteration = await project_services.get_iteration(session, iteration_id)
-    await rbac.require_project_role(
-        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
-    )
-    return schemas.RuleSetBindingOut(
-        iteration_id=iteration_id, rule_set_id=await services.get_binding(session, iteration_id)
-    )
-
-
 # ---- 检查运行与报告 ----
-
-
-@router.post("/iterations/{iteration_id}/check-runs", response_model=schemas.CheckRunOut, status_code=202)
-async def create_check_run(
-    iteration_id: int, body: schemas.CheckRunIn, user: CurrentUser, session: SessionDep
-) -> schemas.CheckRunOut:
-    """发起批量检查（designer+）：创建 check_run + 任务，worker 执行。"""
-    iteration = await project_services.get_iteration(session, iteration_id)
-    await rbac.require_project_role(session, iteration.project_id, user.id, "designer", is_superuser=user.is_superuser)
-    check_run, _task = await services.create_check_run(
-        session, actor_id=user.id, iteration_id=iteration_id, rule_set_id=body.rule_set_id
-    )
-    await session.commit()
-    out = schemas.CheckRunOut.model_validate(check_run)
-    out.task_id = await services.get_check_run_task_id(session, check_run.id)
-    return out
 
 
 @router.get("/iterations/{iteration_id}/check-runs", response_model=list[schemas.CheckRunOut])

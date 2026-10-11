@@ -21,7 +21,7 @@ const { Sider, Header, Content } = Layout;
 const MENU_ITEMS = [
   { key: '/', icon: <ProjectOutlined />, label: '项目管理' },
   { key: '/rules', icon: <ExperimentOutlined />, label: '规则库' },
-  { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '审查模板' },
+  { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '模板管理' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
 ];
 

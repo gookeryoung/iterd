@@ -1,4 +1,4 @@
-"""补充覆盖测试：RBAC 边界 / 迭代与基线端点 / 规则与报告 / 溯源图 / 任务与 seed 边缘路径."""
+"""补充覆盖测试：RBAC 边界 / 迭代端点 / 规则与报告 / 溯源图 / 任务与 seed 边缘路径."""
 
 from __future__ import annotations
 
@@ -65,9 +65,7 @@ def test_designer_project_visibility_and_member_ops(client: TestClient, project:
     assert denied.status_code == 403
 
 
-def test_iteration_and_baseline_endpoints(
-    client: TestClient, project: dict[str, Any], iteration: dict[str, Any]
-) -> None:
+def test_iteration_endpoints(client: TestClient, project: dict[str, Any], iteration: dict[str, Any]) -> None:
     pid, iid = project["id"], iteration["id"]
     assert client.get(f"/api/v1/projects/{pid}/iterations").status_code == 200
     got = client.get(f"/api/v1/iterations/{iid}")
@@ -77,19 +75,9 @@ def test_iteration_and_baseline_endpoints(
     renamed = client.patch(f"/api/v1/iterations/{iid}", json={"title": "迭代改", "objective": "目标"})
     assert renamed.status_code == 200 and renamed.json()["title"] == "迭代改"
 
-    assert client.get(f"/api/v1/iterations/{iid}/baselines").json() == []
-    # 产物带版本后建基线
-    art = client.post(
-        f"/api/v1/artifacts?iteration_id={iid}", json={"code": "CV-1", "name": "件", "category": "drawing"}
-    ).json()
-    version = client.post(f"/api/v1/artifacts/{art['id']}/versions", files={"file": ("CV-1_revA.dwg", b"v")}).json()
-    baseline = client.post(f"/api/v1/iterations/{iid}/baselines", json={"name": "BL-CV"})
-    assert baseline.status_code == 201, baseline.text
-    detail = client.get(f"/api/v1/baselines/{baseline.json()['id']}")
-    assert detail.status_code == 200
-    assert detail.json()["items"][0]["artifact_version_id"] == version["id"]
+    # 基线端点已移除（404 守卫）
+    assert client.get(f"/api/v1/iterations/{iid}/baselines").status_code == 404
     assert client.get("/api/v1/baselines/99999").status_code == 404
-    assert len(client.get(f"/api/v1/iterations/{iid}/baselines").json()) == 1
 
 
 def test_rules_crud_and_rule_sets(client: TestClient, project: dict[str, Any], iteration: dict[str, Any]) -> None:
@@ -129,21 +117,18 @@ def test_rules_crud_and_rule_sets(client: TestClient, project: dict[str, Any], i
     )
     assert rs.status_code == 201, rs.text
     assert len(client.get("/api/v1/rule-sets", params={"project_id": project["id"]}).json()) == 2
-    assert client.post("/api/v1/rule-sets/99999/bind", json={"iteration_id": iteration["id"]}).status_code == 404
-    assert client.post(f"/api/v1/rule-sets/{rs.json()['id']}/bind", json={"iteration_id": 99999}).status_code == 404
-    bound = client.post(f"/api/v1/rule-sets/{rs.json()['id']}/bind", json={"iteration_id": iteration["id"]})
-    assert bound.status_code == 201
-    # 重复绑定覆盖
+
+    # 绑定与独立触发端点已移除（SPA 挂载下 GET→404 / POST→405 守卫）
     assert (
         client.post(f"/api/v1/rule-sets/{rs.json()['id']}/bind", json={"iteration_id": iteration["id"]}).status_code
-        == 201
+        == 405
     )
-
-    # 检查运行 404 分支
     assert (
-        client.post(f"/api/v1/iterations/{iteration['id']}/check-runs", json={"rule_set_id": 99999}).status_code == 404
+        client.post(
+            f"/api/v1/iterations/{iteration['id']}/check-runs", json={"rule_set_id": rs.json()["id"]}
+        ).status_code
+        == 405
     )
-    assert client.post("/api/v1/iterations/99999/check-runs", json={"rule_set_id": rs.json()["id"]}).status_code == 404
 
 
 def test_findings_filters_and_trace_graph(
@@ -161,27 +146,43 @@ def test_findings_filters_and_trace_graph(
             "severity_default": "error",
         },
     ).json()
-    rs = client.post("/api/v1/rule-sets", json={"name": "过滤集", "rule_ids": [rule["id"]]}).json()
+    client.post("/api/v1/rule-sets", json={"name": "过滤集", "rule_ids": [rule["id"]]})
     art = client.post(
         f"/api/v1/artifacts?iteration_id={iid}", json={"code": "FF-A", "name": "件", "category": "drawing"}
     ).json()
     client.post(f"/api/v1/artifacts/{art['id']}/versions", files={"file": ("bad.dwg", b"x")})
-    run = client.post(f"/api/v1/iterations/{iid}/check-runs", json={"rule_set_id": rs["id"]})
+
+    # 规则检查运行经审查流水线触发（唯一入口）
+    workflow = client.post(
+        "/api/v1/workflows",
+        json={
+            "code": "FF-REVIEW",
+            "name": "过滤审查",
+            "project_id": project["id"],
+            "definition": "name: 过滤审查\njobs:\n  check:\n    uses: rules/check\n    with: {rule_set: 过滤集}\n",
+        },
+    ).json()
+    run = client.post(f"/api/v1/iterations/{iid}/workflow-runs", json={"workflow_id": workflow["id"]})
     assert run.status_code == 202, run.text
     run_id = run.json()["id"]
     for _ in range(50):
-        state = client.get(f"/api/v1/check-runs/{run_id}").json()
+        state = client.get(f"/api/v1/workflow-runs/{run_id}").json()
         if state["status"] in ("succeeded", "failed"):
             break
         time.sleep(0.2)
-    assert state["status"] == "succeeded", state
+    assert state["status"] == "failed", state
+    check_run_id = next(j["check_run_id"] for j in state["jobs"] if j["job_type"] == "rules")
+    assert client.get(f"/api/v1/check-runs/{check_run_id}").json()["summary"]["error"] == 1
 
-    findings = client.get(f"/api/v1/check-runs/{run_id}/findings").json()
+    findings = client.get(f"/api/v1/check-runs/{check_run_id}/findings").json()
     assert len(findings) >= 1
     version_id = findings[0]["artifact_version_id"]
     rule_item_id = findings[0]["rule_item_id"]
-    assert client.get(f"/api/v1/check-runs/{run_id}/findings", params={"rule_item_id": rule_item_id}).status_code == 200
-    by_version = client.get(f"/api/v1/check-runs/{run_id}/findings", params={"artifact_version_id": version_id})
+    assert (
+        client.get(f"/api/v1/check-runs/{check_run_id}/findings", params={"rule_item_id": rule_item_id}).status_code
+        == 200
+    )
+    by_version = client.get(f"/api/v1/check-runs/{check_run_id}/findings", params={"artifact_version_id": version_id})
     assert by_version.status_code == 200 and len(by_version.json()) >= 1
 
     # 溯源图：project -contains-> iteration -contains-> version

@@ -132,6 +132,35 @@ export function RunStatusIcon({ status, summary }: { status: WorkflowRunStatus; 
   return <FailureIcon size={18} />;
 }
 
+/** 步骤状态 → 图标（与作业同语义）。 */
+export function StepStatusIcon({ status, conclusion }: { status: WorkflowJobStatus; conclusion: WorkflowConclusion | null }) {
+  return <JobStatusIcon status={status} conclusion={conclusion} />;
+}
+
+/** 运行触发方式徽标（GitHub Actions 事件语义）。 */
+export function TriggerBadge({ trigger }: { trigger: 'submission' | 'manual' | 'rerun' }) {
+  const labels: Record<typeof trigger, string> = {
+    submission: '方案提交',
+    manual: '手动发起',
+    rerun: '重新运行',
+  };
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        lineHeight: '18px',
+        padding: '0 8px',
+        borderRadius: 10,
+        border: `1px solid ${PRIMER_COLORS.border}`,
+        color: PRIMER_COLORS.neutral,
+        background: PRIMER_COLORS.canvas,
+      }}
+    >
+      {labels[trigger]}
+    </span>
+  );
+}
+
 /** 作业类型徽标（GitHub Actions 的 job 类型标识风格）。 */
 export function JobTypeBadge({ jobType }: { jobType: 'rules' | 'simulation' }) {
   const isRules = jobType === 'rules';

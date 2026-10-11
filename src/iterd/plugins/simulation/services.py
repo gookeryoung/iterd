@@ -85,53 +85,6 @@ async def update_template(
 # ---- 仿真作业 ----
 
 
-async def create_sim_job(  # noqa: PLR0913 - 作业字段
-    session: AsyncSession,
-    *,
-    actor_id: int,
-    iteration_id: int,
-    template_id: int,
-    artifact_version_id: int | None = None,
-    inputs: dict[str, Any] | None = None,
-) -> tuple[SimJob, Any]:
-    """创建仿真作业 + 任务记录（同事务，status=pending）。"""
-    from iterd.plugins.artifacts.models import ArtifactVersion
-    from iterd.plugins.projects.models import Iteration
-    from iterd.tasks.models import Task
-
-    if await session.get(Iteration, iteration_id) is None:
-        raise not_found(f"迭代不存在: {iteration_id}")
-    template = await get_template(session, template_id)
-    if not template.enabled:
-        raise IterdError(f"仿真模板已停用: {template.code}", code="ITERD-INVALID_STATE")
-    if artifact_version_id is not None and await session.get(ArtifactVersion, artifact_version_id) is None:
-        raise not_found(f"产物版本不存在: {artifact_version_id}")
-
-    job = SimJob(
-        iteration_id=iteration_id,
-        template_id=template_id,
-        artifact_version_id=artifact_version_id,
-        status="pending",
-        inputs=inputs,
-        created_by=actor_id,
-    )
-    session.add(job)
-    await session.flush()
-    task = Task(task_type="sim_job", payload={"sim_job_id": job.id}, status="pending")
-    session.add(task)
-    await session.flush()
-    await audit(
-        session,
-        actor_id=actor_id,
-        actor_name="",
-        action="sim_job.create",
-        resource_type="sim_job",
-        resource_id=job.id,
-        after={"iteration_id": iteration_id, "template_id": template_id},
-    )
-    return job, task
-
-
 async def get_sim_job(session: AsyncSession, job_id: int) -> SimJob:
     """取作业，不存在抛 404."""
     job = await session.get(SimJob, job_id)

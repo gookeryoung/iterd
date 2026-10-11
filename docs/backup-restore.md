@@ -107,6 +107,10 @@ iterd restore ~/.iterd/backups/iterd-backup-0.1.0-v1-20261008T235900Z.tar.gz
 
 ## 6. 异常处理
 
+> **升级警示**：迁移 `0004` 为破坏性变更——删除基线（`baselines` / `baseline_items`）与规则集绑定
+> （`rule_set_bindings`）三类数据表。从旧版本升级前请先执行 `iterd backup` 备份；升级后上述数据不保留，
+> 规则集改由审查模板 rules/check 作业的 `with.rule_set` 引用生效。
+
 | 现象 | 原因 | 处理方案 |
 |---|---|---|
 | `备份失败: SQLite 数据库文件不存在` | database_url 指向的库尚未创建 | 先 `iterd seed` 或启动一次服务建库 |

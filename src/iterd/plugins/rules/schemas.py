@@ -64,25 +64,6 @@ class RuleSetRuleIn(BaseModel):
     rule_ids: list[int] = []
 
 
-class RuleSetBindIn(BaseModel):
-    """规则集绑定入参."""
-
-    rule_set_id: int
-
-
-class RuleSetBindingOut(BaseModel):
-    """迭代规则集绑定（未绑定时 rule_set_id 为 null）。"""
-
-    iteration_id: int
-    rule_set_id: int | None
-
-
-class CheckRunIn(BaseModel):
-    """发起批量检查入参."""
-
-    rule_set_id: int
-
-
 class CheckRunOut(BaseModel):
     """检查运行对外结构."""
 

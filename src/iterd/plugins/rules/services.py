@@ -18,7 +18,6 @@ from iterd.plugins.rules.models import (
     CheckRun,
     RuleItem,
     RuleSet,
-    RuleSetBinding,
     RuleSetItem,
 )
 
@@ -109,14 +108,6 @@ async def set_rule_set_rules(session: AsyncSession, *, rule_set_id: int, rule_id
     return await get_rule_set_rules(session, rule_set_id)
 
 
-async def get_binding(session: AsyncSession, iteration_id: int) -> int | None:
-    """查询迭代绑定的规则集（未绑定返回 None）。"""
-    row = (
-        await session.execute(select(RuleSetBinding.rule_set_id).where(RuleSetBinding.iteration_id == iteration_id))
-    ).scalar_one_or_none()
-    return int(row) if row is not None else None
-
-
 async def list_rule_sets(session: AsyncSession, *, project_id: int | None = None) -> list[RuleSet]:
     """规则集列表：给定 project 时含全局（project_id IS NULL）。"""
     stmt = select(RuleSet).order_by(RuleSet.id)
@@ -166,61 +157,6 @@ async def add_rule_to_set(session: AsyncSession, *, rule_set_id: int, rule_id: i
         await session.flush()
         return item
     return await session.get(RuleSetItem, existing)  # type: ignore[return-value]
-
-
-async def bind_rule_set(session: AsyncSession, *, actor_id: int, rule_set_id: int, iteration_id: int) -> RuleSetBinding:
-    """绑定规则集到迭代（P0 单迭代单绑定，重复绑定覆盖）。"""
-    from iterd.plugins.projects.models import Iteration
-
-    if await session.get(Iteration, iteration_id) is None:
-        raise not_found(f"迭代不存在: {iteration_id}")
-    await get_rule_set(session, rule_set_id)
-    binding = (
-        await session.execute(select(RuleSetBinding).where(RuleSetBinding.iteration_id == iteration_id))
-    ).scalar_one_or_none()
-    if binding is not None:
-        binding.rule_set_id = rule_set_id
-    else:
-        binding = RuleSetBinding(rule_set_id=rule_set_id, iteration_id=iteration_id)
-        session.add(binding)
-    await audit(
-        session,
-        actor_id=actor_id,
-        actor_name="",
-        action="rule_set.bind",
-        resource_type="rule_set",
-        resource_id=rule_set_id,
-        after={"iteration_id": iteration_id},
-    )
-    return binding
-
-
-async def create_check_run(
-    session: AsyncSession, *, actor_id: int, iteration_id: int, rule_set_id: int
-) -> tuple[CheckRun, Any]:
-    """创建检查运行 + 任务记录（同事务，status=pending）。"""
-    from iterd.plugins.projects.models import Iteration
-    from iterd.tasks.models import Task
-
-    if await session.get(Iteration, iteration_id) is None:
-        raise not_found(f"迭代不存在: {iteration_id}")
-    await get_rule_set(session, rule_set_id)
-    check_run = CheckRun(iteration_id=iteration_id, rule_set_id=rule_set_id, status="pending")
-    session.add(check_run)
-    await session.flush()
-    task = Task(task_type="check_run", payload={"check_run_id": check_run.id}, status="pending")
-    session.add(task)
-    await session.flush()
-    await audit(
-        session,
-        actor_id=actor_id,
-        actor_name="",
-        action="check_run.create",
-        resource_type="check_run",
-        resource_id=check_run.id,
-        after={"iteration_id": iteration_id, "rule_set_id": rule_set_id},
-    )
-    return check_run, task
 
 
 @dataclass

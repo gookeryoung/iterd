@@ -1,4 +1,4 @@
-/** 审查模板管理页：列表 + 新建/编辑 Drawer（YAML 编辑 + 实时结构预览）+ YAML 查看。 */
+/** 模板管理页：审查模板（YAML 编排）+ 仿真模板管理 Tabs。 */
 
 import { useMemo, useState } from 'react';
 import {
@@ -12,6 +12,7 @@ import {
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd';
@@ -30,6 +31,7 @@ import { fetchProjects } from '../api/projects';
 import type { WorkflowTemplate } from '../types';
 import { formatDateTime } from '../utils/format';
 import YamlBlock from '../components/workflows/YamlBlock';
+import SimTemplatesPanel from '../components/workflows/SimTemplatesPanel';
 
 /** 新建模板默认 YAML（含门禁链示例）。 */
 const DEFAULT_DEFINITION = `name: 详细设计审查
@@ -183,46 +185,67 @@ export default function WorkflowTemplatesPage() {
 
   const definitionValue = Form.useWatch('definition', form);
 
+  const projectOptions = (projectsQuery.data ?? []).map((p) => ({ value: p.id, label: p.name }));
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          审查模板
-          <Typography.Text type="secondary" style={{ fontSize: 13, marginLeft: 12, fontWeight: 400 }}>
-            YAML 编排的迭代审查流水线（GitHub Actions 模式：jobs / needs / uses / with）
-          </Typography.Text>
-        </Typography.Title>
-        <Space>
-          <Select
-            style={{ width: 200 }}
-            allowClear
-            placeholder="按项目过滤（含全局）"
-            value={projectFilter}
-            onChange={(value) => setProjectFilter(value)}
-            options={(projectsQuery.data ?? []).map((p) => ({ value: p.id, label: p.name }))}
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建模板
-          </Button>
-        </Space>
-      </div>
+      <Typography.Title level={4} style={{ marginTop: 0 }}>
+        模板管理
+        <Typography.Text type="secondary" style={{ fontSize: 13, marginLeft: 12, fontWeight: 400 }}>
+          审查模板编排流水线（GitHub Actions 模式：jobs / needs / uses / with），仿真模板供 simulation/run 作业引用
+        </Typography.Text>
+      </Typography.Title>
 
-      <Table<WorkflowTemplate>
-        rowKey="id"
-        columns={columns}
-        dataSource={workflows}
-        loading={workflowsQuery.isPending}
-        pagination={false}
-        size="middle"
-        locale={{
-          emptyText: (
-            <Empty description="暂无审查模板">
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-                新建第一个模板
-              </Button>
-            </Empty>
-          ),
-        }}
+      <Tabs
+        defaultActiveKey="workflows"
+        items={[
+          {
+            key: 'workflows',
+            label: '审查模板',
+            children: (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Space>
+                    <Select
+                      style={{ width: 200 }}
+                      allowClear
+                      placeholder="按项目过滤（含全局）"
+                      value={projectFilter}
+                      onChange={(value) => setProjectFilter(value)}
+                      options={projectOptions}
+                    />
+                  </Space>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                    新建模板
+                  </Button>
+                </div>
+
+                <Table<WorkflowTemplate>
+                  rowKey="id"
+                  columns={columns}
+                  dataSource={workflows}
+                  loading={workflowsQuery.isPending}
+                  pagination={false}
+                  size="middle"
+                  locale={{
+                    emptyText: (
+                      <Empty description="暂无审查模板">
+                        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                          新建第一个模板
+                        </Button>
+                      </Empty>
+                    ),
+                  }}
+                />
+              </div>
+            ),
+          },
+          {
+            key: 'sim-templates',
+            label: '仿真模板',
+            children: <SimTemplatesPanel projectOptions={projectOptions} />,
+          },
+        ]}
       />
 
       {/* 新建/编辑 Drawer */}

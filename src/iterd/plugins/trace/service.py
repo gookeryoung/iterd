@@ -15,7 +15,7 @@ NODE_TYPES = (
     "iteration",
     "artifact_version",
     "rule_item",
-    "baseline",
+    "submission",
     "check_finding",
     "sim_template",
     "sim_job",

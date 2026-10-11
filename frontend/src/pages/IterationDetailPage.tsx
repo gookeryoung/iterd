@@ -1,4 +1,4 @@
-/** 迭代详情页（P0 核心）：迭代信息 + 产物 / 规则检查 / 基线 Tabs。 */
+/** 迭代详情页（P0 核心）：迭代信息 + 产物 / 审查流水线 Tabs。 */
 
 import { Button, Descriptions, Spin, Tabs, Typography } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -8,9 +8,6 @@ import { fetchIteration } from '../api/projects';
 import { IterationStatusTag } from '../components/StatusTags';
 import ArtifactTab from '../components/ArtifactTab';
 import WorkflowsTab from '../components/WorkflowsTab';
-import CheckTab from '../components/CheckTab';
-import SimTab from '../components/SimTab';
-import BaselineTab from '../components/BaselineTab';
 
 export default function IterationDetailPage() {
   const params = useParams();
@@ -70,30 +67,7 @@ export default function IterationDetailPage() {
           {
             key: 'workflows',
             label: '审查流水线',
-            children: (
-              <WorkflowsTab iterationId={iterationId} projectId={iteration.project_id} />
-            ),
-          },
-          {
-            key: 'checks',
-            label: '规则检查',
-            children: (
-              <CheckTab iterationId={iterationId} projectId={iteration.project_id} />
-            ),
-          },
-          {
-            key: 'simulation',
-            label: '仿真验证',
-            children: (
-              <SimTab iterationId={iterationId} projectId={iteration.project_id} />
-            ),
-          },
-          {
-            key: 'baselines',
-            label: '基线',
-            children: (
-              <BaselineTab iterationId={iterationId} iterationStatus={iteration.status} />
-            ),
+            children: <WorkflowsTab iterationId={iterationId} />,
           },
         ]}
       />

@@ -118,24 +118,6 @@ async def _job_out(session: SessionDep, job: SimJob) -> schemas.SimJobOut:
     return out
 
 
-@router.post("/iterations/{iteration_id}/sim-jobs", response_model=schemas.SimJobOut, status_code=202)
-async def create_sim_job(
-    iteration_id: int, body: schemas.SimJobIn, user: CurrentUser, session: SessionDep
-) -> schemas.SimJobOut:
-    """发起仿真作业（designer+）：创建作业 + 任务，worker 执行求解与评估。"""
-    await _authorize_iteration(session, user, iteration_id, "designer")
-    job, _task = await services.create_sim_job(
-        session,
-        actor_id=user.id,
-        iteration_id=iteration_id,
-        template_id=body.template_id,
-        artifact_version_id=body.artifact_version_id,
-        inputs=body.inputs,
-    )
-    await session.commit()
-    return await _job_out(session, job)
-
-
 @router.get("/iterations/{iteration_id}/sim-jobs", response_model=list[schemas.SimJobOut])
 async def list_sim_jobs(iteration_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.SimJobOut]:
     """迭代下仿真作业列表（viewer+，含任务 id）。"""

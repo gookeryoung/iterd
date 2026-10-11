@@ -2,7 +2,7 @@
 
 覆盖模式：每次执行先清空业务数据（项目/迭代/产物/规则/规则集/检查/仿真/任务/溯源，
 保留用户与审计日志），再重建三员 + 普通用户账号、演示项目全流程内容，并载入
-``examples/datasets/`` 下全部典型案例（含同步预执行规则检查与仿真），
+``examples/datasets/`` 下全部典型案例（含同步预执行审查流水线），
 典型案例数据集更新后重跑 ``iterd seed`` 即可立即在界面展示。
 
 三员模型参考 GB/T 22239 等级保护（对标 cndb seed 设计）：
@@ -42,11 +42,12 @@ _DEMO_USERS: tuple[tuple[str, str, UserRole], ...] = (
     ("demo", "demo1234", UserRole.USER),
 )
 
-# 演示规则集（项目级）：绑定首个迭代，检查 Tab 开箱即用
+# 演示规则集（项目级）：供演示审查流水线的规则检查作业使用
 _DEMO_RULE_SET_NAME = "演示规则集"
 
-# 预置基线名称
-_DEMO_BASELINE_NAME = "BL-首轮迭代"
+# 演示仿真模板 / 审查模板编码
+_DEMO_SIM_TEMPLATE_CODE = "DEMO-BEAM-CHECK"
+_DEMO_WORKFLOW_CODE = "DEMO-REVIEW"
 
 # 覆盖时保留的表：账号与审计日志（只增不改）
 _KEEP_TABLES = frozenset({"users", "audit_logs"})
@@ -182,7 +183,7 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
         session,
         actor_id=admin.id,
         artifact=artifact,
-        filename="DEMO-001_rev-A.dwg",
+        filename="DEMO-001_revA.dwg",
         content_type="application/octet-stream",
         stream=io.BytesIO(b"demo dwg content"),
         metadata={"材料": "Q235", "尺寸": "100x50x10", "公差": "±0.1"},
@@ -223,11 +224,11 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
     )
     logger.info("[seed] 创建规则: MATERIAL-001 材料元数据必填")
 
-    # 演示全流程内容：规则集 / 绑定 / 迭代激活 / 基线 / 预置检查运行
+    # 演示全流程内容：规则集 / 迭代激活 / 演示审查模板 / 预置提交与运行
     logger.info("[seed] 步骤 4/5：完善演示全流程内容")
     demo_flow = await _ensure_demo_flow(session, actor_id=admin.id)
 
-    # 典型案例：examples/datasets 全量载入并预执行检查/仿真（非源码仓库自动跳过）
+    # 典型案例：examples/datasets 全量载入并预执行审查流水线（非源码仓库自动跳过）
     logger.info("[seed] 步骤 5/5：载入典型案例数据集")
     from iterd.example_datasets import datasets_root, load_all_cases
 
@@ -238,13 +239,11 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
         cases = await load_all_cases(session, actor_id=admin.id)
         for case in cases:
             logger.info(
-                "[seed] 典型案例 %s：项目 %s / 迭代 %s / 产物 %s / 检查 %s / 仿真 %s / 流水线 %s",
+                "[seed] 典型案例 %s：项目 %s / 迭代 %s / 产物 %s / 流水线运行 %s",
                 case["name"],
                 case["projects"],
                 case["iterations"],
                 case["artifacts"],
-                len(case["checks"]),
-                len(case["sims"]),
                 len(case["workflows"]),
             )
 
@@ -252,20 +251,41 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
     return {"users": summary, "demo_flow": demo_flow, "cases": cases}
 
 
+# 演示审查模板定义：规则检查 → 梁静力仿真（needs 门禁），全绿链路演示
+_DEMO_WORKFLOW_DEFINITION = """\
+name: 演示审查流水线
+description: 静态规则检查通过后执行梁静力校核
+
+jobs:
+  rules-check:
+    name: 静态规则检查
+    uses: rules/check
+    with:
+      rule_set: 演示规则集
+  beam-check:
+    name: 梁静力校核
+    needs: rules-check
+    uses: simulation/run
+    with:
+      template: DEMO-BEAM-CHECK
+      artifact: DEMO-001
+"""
+
+
 async def _ensure_demo_flow(session: AsyncSession, *, actor_id: int) -> dict[str, Any]:
-    """确保演示全流程内容齐备：规则集 / 绑定 / 迭代激活 / 基线 / 预置检查运行.
+    """确保演示全流程内容齐备：规则集 / 迭代激活 / 演示审查模板 / 提交方案与运行.
 
-    全部幂等（按名称 / 既有数据查重）；预置检查运行在 seed 会话内直接执行
-    （与 worker 同一执行路径），保证打开界面即有已完成的检查运行与发现项。
+    全部幂等（按名称 / 编码 / 既有提交查重）；提交产生的运行在 seed 会话内同步执行
+    （与 worker 同一执行路径，调度任务执行后删除避免 worker 重复执行），
+    保证打开界面即有完整的 提交 → 运行 → 步骤 → 日志 演示数据。
     """
-    from iterd.plugins.rules.models import CheckRun
-
     flow: dict[str, Any] = {
         "rule_set": False,
-        "binding": False,
         "activated": False,
-        "baseline": False,
-        "check_run_id": None,
+        "sim_template": False,
+        "workflow": False,
+        "submission_id": None,
+        "runs": 0,
     }
     project = next((p for p in await project_services.list_projects(session) if p.code == "DEMO"), None)
     if project is None:
@@ -277,7 +297,7 @@ async def _ensure_demo_flow(session: AsyncSession, *, actor_id: int) -> dict[str
         return flow
     iteration = iterations[0]
 
-    # 1) 演示规则集（项目级，成员为全部既有规则）并绑定首个迭代
+    # 1) 演示规则集（项目级，成员为全部既有规则），供规则检查作业引用
     rule_set = next(
         (
             rs
@@ -298,14 +318,8 @@ async def _ensure_demo_flow(session: AsyncSession, *, actor_id: int) -> dict[str
         )
         flow["rule_set"] = True
         logger.info("[seed] 创建规则集: %s（%s 条规则）", rule_set.name, len(rules))
-    if await rule_services.get_binding(session, iteration.id) is None:
-        await rule_services.bind_rule_set(
-            session, actor_id=actor_id, rule_set_id=rule_set.id, iteration_id=iteration.id
-        )
-        flow["binding"] = True
-        logger.info("[seed] 绑定规则集到迭代: %s（迭代 %s）", rule_set.name, iteration.number)
 
-    # 2) 激活首个迭代（planned → active，走状态机）
+    # 2) 激活首个迭代（planned → active，走状态机；active 才可提交方案）
     if iteration.status == "planned":
         await project_services.update_iteration(
             session, actor_id=actor_id, iteration=iteration, fields={"status": "active"}
@@ -313,26 +327,83 @@ async def _ensure_demo_flow(session: AsyncSession, *, actor_id: int) -> dict[str
         flow["activated"] = True
         logger.info("[seed] 激活迭代: %s（#%s）", iteration.title, iteration.number)
 
-    # 3) 基线：锁定迭代内产物当前版本
-    baseline_names = {b.name for b in await project_services.list_baselines(session, iteration.id)}
-    if _DEMO_BASELINE_NAME not in baseline_names:
-        await project_services.create_baseline(
-            session, actor_id=actor_id, iteration_id=iteration.id, name=_DEMO_BASELINE_NAME
-        )
-        flow["baseline"] = True
-        logger.info("[seed] 创建基线: %s", _DEMO_BASELINE_NAME)
+    # 3) 演示仿真模板（beam_static 梁静力校核）与审查模板（rules-check → beam-check 门禁链路）
+    from iterd.plugins.simulation import services as sim_services
+    from iterd.plugins.workflows import services as workflow_services
 
-    # 4) 预置检查运行：无检查记录时执行一次，展示发现项与汇总
-    runs = list((await session.execute(select(CheckRun.id).where(CheckRun.iteration_id == iteration.id))).scalars())
-    if not runs:
-        check_run, _task = await rule_services.create_check_run(
-            session, actor_id=actor_id, iteration_id=iteration.id, rule_set_id=rule_set.id
+    sim_template = next(
+        (
+            t
+            for t in await sim_services.list_templates(session, project_id=project.id)
+            if t.code == _DEMO_SIM_TEMPLATE_CODE
+        ),
+        None,
+    )
+    if sim_template is None:
+        await sim_services.create_template(
+            session,
+            actor_id=actor_id,
+            code=_DEMO_SIM_TEMPLATE_CODE,
+            name="梁静力校核（演示）",
+            solver_type="beam_static",
+            project_id=project.id,
+            params={"load": 1000, "length": 500, "width": 20, "height": 40, "modulus": 206000, "yield_strength": 235},
+            thresholds={"max_stress": {"max": 160}, "deflection": {"max": 2.0}, "safety_factor": {"min": 1.2}},
+            description="演示仿真模板：beam_static 求解器默认工况，三项指标均在阈值内，结论 pass",
         )
-        run_summary = await rule_services.execute_check_run(session, check_run_id=check_run.id)
-        flow["check_run_id"] = check_run.id
-        logger.info("[seed] 预置检查运行 #%s 完成：%s", check_run.id, run_summary)
+        flow["sim_template"] = True
+        logger.info("[seed] 创建演示仿真模板: %s", _DEMO_SIM_TEMPLATE_CODE)
+    workflow = next(
+        (
+            t
+            for t in await workflow_services.list_templates(session, project_id=project.id)
+            if t.code == _DEMO_WORKFLOW_CODE
+        ),
+        None,
+    )
+    if workflow is None:
+        await workflow_services.create_template(
+            session,
+            actor_id=actor_id,
+            project_id=project.id,
+            code=_DEMO_WORKFLOW_CODE,
+            name="演示审查流水线",
+            description="静态规则检查通过后执行梁静力校核；演示数据全绿，流水线结论 success",
+            definition=_DEMO_WORKFLOW_DEFINITION,
+        )
+        flow["workflow"] = True
+        logger.info("[seed] 创建演示审查模板: %s", _DEMO_WORKFLOW_CODE)
+
+    # 4) 提交一次迭代方案并进程内执行（无既有提交时；运行走 worker 同一执行路径）
+    from iterd.tasks.models import Task
+
+    submissions = await workflow_services.list_submissions(session, iteration_id=iteration.id)
+    if not submissions:
+        submission, runs = await workflow_services.create_submission(
+            session,
+            actor_id=actor_id,
+            iteration_id=iteration.id,
+            title="首轮方案提交",
+            note="seed 预置演示提交：触发项目内全部启用审查模板",
+        )
+        flow["submission_id"] = int(submission.id)
+        for run in runs:
+            run_id = int(run.id)
+            summary = await workflow_services.execute_workflow_run(session, run_id=run_id)
+            flow["runs"] += 1
+            logger.info("[seed] 演示运行 #%s 执行完成：%s", run_id, summary.get("conclusion"))
+        # 同步执行后清理遗留调度任务，避免 serve 启动 worker 后重复执行
+        stale = (
+            await session.execute(select(Task.id).where(Task.task_type == "workflow_run", Task.status == "pending"))
+        ).scalars()
+        for task_id in list(stale):
+            task = await session.get(Task, int(task_id))
+            if task is not None:
+                await session.delete(task)
+        await session.commit()
+        logger.info("[seed] 预置提交方案 #%s：%s 条运行", submission.id, len(runs))
     else:
-        logger.info("[seed] 迭代已有检查运行，跳过预置检查")
+        logger.info("[seed] 迭代已有提交方案，跳过预置提交")
     return flow
 
 

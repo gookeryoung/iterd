@@ -3,7 +3,6 @@
 import { api } from './client';
 import type {
   SimJob,
-  SimJobInput,
   SimResult,
   SimTemplate,
   SimTemplateInput,
@@ -47,18 +46,6 @@ export async function updateSimTemplate(
   data: SimTemplateUpdateInput,
 ): Promise<SimTemplate> {
   const resp = await api.patch<SimTemplate>(`/sim-templates/${id}`, data);
-  return resp.data;
-}
-
-/** 发起仿真作业（后端 202，返回待执行的作业）。 */
-export async function createSimJob(
-  iterationId: number,
-  data: SimJobInput,
-): Promise<SimJob> {
-  const resp = await api.post<SimJob>(
-    `/iterations/${iterationId}/sim-jobs`,
-    data,
-  );
   return resp.data;
 }
 

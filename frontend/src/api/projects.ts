@@ -1,9 +1,7 @@
-/** 项目 / 成员 / 迭代 / 基线相关 API。 */
+/** 项目 / 成员 / 迭代相关 API。 */
 
 import { api } from './client';
 import type {
-  Baseline,
-  BaselineDetail,
   Iteration,
   IterationInput,
   IterationStatus,
@@ -97,23 +95,5 @@ export async function updateIteration(
   },
 ): Promise<Iteration> {
   const resp = await api.patch<Iteration>(`/iterations/${id}`, fields);
-  return resp.data;
-}
-
-/** 迭代下基线列表。 */
-export async function fetchBaselines(iterationId: number): Promise<Baseline[]> {
-  const resp = await api.get<Baseline[]>(`/iterations/${iterationId}/baselines`);
-  return resp.data;
-}
-
-/** 建立基线（planned 迭代后端返回 400）。 */
-export async function createBaseline(iterationId: number, name: string): Promise<BaselineDetail> {
-  const resp = await api.post<BaselineDetail>(`/iterations/${iterationId}/baselines`, { name });
-  return resp.data;
-}
-
-/** 基线详情（含快照条目）。 */
-export async function fetchBaseline(id: number): Promise<BaselineDetail> {
-  const resp = await api.get<BaselineDetail>(`/baselines/${id}`);
   return resp.data;
 }

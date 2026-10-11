@@ -1,6 +1,6 @@
 产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
-RND-401,传动轴三维模型,model,BND-2026,1,RND-401_revA.step,合规基准数据；重量kg 登记为 500（恰好等于上限的边界演示值，判定通过）；元数据含数值字段 4.2 与布尔字段 true；SHAFT 系列仿真绑定对象
-rnd-402,加长立柱三维模型,model,BND-2026,1,rnd-402_revA.step,小写产物编码（触发 BND-CODE-401 error）；COL 系列仿真绑定对象
+RND-401,传动轴三维模型,model,BND-2026,1,RND-401_revA.step,合规基准数据；重量kg 登记为 500（恰好等于上限的边界演示值，判定通过）；元数据含数值字段 4.2 与布尔字段 true；SHAFT 系列仿真引用对象
+rnd-402,加长立柱三维模型,model,BND-2026,1,rnd-402_revA.step,小写产物编码（触发 BND-CODE-401 error）；COL 系列仿真引用对象
 RND403,端盖零件图,drawing,BND-2026,1,RND403_revA.dwg,缺连字符产物编码（触发 BND-CODE-401 error）
 CAL-401,立柱稳定性计算书,result,BND-2026,1,CAL-401_revA.csv,重量kg 误填中文文本 约4.2（触发 BND-RANGE-401 类型错误 error）
 RND-404,传动轴三维模型（改型）,model,BND-2026,1,RND-404_revA.STEP,大写扩展名 .STEP（大小写不敏感判定通过）；重量kg 登记为 0.1（恰好等于下限的边界演示值，判定通过）

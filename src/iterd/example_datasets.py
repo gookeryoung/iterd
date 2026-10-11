@@ -1,6 +1,6 @@
 """典型案例数据集载入：examples/datasets/项目-XXX → iterd 业务对象.
 
-供 ``iterd seed``（覆盖重建后载入全部典型案例并预执行检查/仿真）与
+供 ``iterd seed``（覆盖重建后载入全部典型案例并预执行审查流水线）与
 ``scripts/load_example.py``（单独载入指定数据集）共用。
 数据部分按编码/名称查重跳过既有记录，幂等；examples/ 仅存在于源码仓库，
 wheel 安装形态下 :func:`datasets_root` 返回 None，调用方据此跳过。
@@ -104,7 +104,7 @@ def coerce_literal(value: str) -> str | int | float | bool:
 
 
 async def load_structure(session: AsyncSession, dataset: Path, actor_id: int) -> dict[str, Any]:
-    """载入项目 / 子项目 / 成员 / 迭代 / 基线，返回编码索引。"""
+    """载入项目 / 子项目 / 成员 / 迭代，返回编码索引。"""
     from iterd.plugins.accounts.services import get_by_username
     from iterd.plugins.projects import services as project_services
 
@@ -112,7 +112,6 @@ async def load_structure(session: AsyncSession, dataset: Path, actor_id: int) ->
     index: dict[str, Any] = {
         "projects": {},  # code -> Project
         "iterations": {},  # (project_code, number) -> Iteration
-        "baselines": [],
     }
 
     root = data["project"]
@@ -180,18 +179,6 @@ async def load_structure(session: AsyncSession, dataset: Path, actor_id: int) ->
                     session, actor_id=actor_id, iteration=iteration, fields={"status": status}
                 )
         index["iterations"][(item["project_code"], number)] = iteration
-    await session.commit()
-
-    for item in data.get("baselines", []):
-        iteration = index["iterations"][(item["project_code"], int(item["iteration_number"]))]
-        baselines = await project_services.list_baselines(session, iteration.id)
-        if any(b.name == item["name"] for b in baselines):
-            continue
-        index["baselines"].append(
-            await project_services.create_baseline(
-                session, actor_id=actor_id, iteration_id=iteration.id, name=item["name"]
-            )
-        )
     await session.commit()
     return index
 
@@ -261,7 +248,7 @@ async def load_rules(session: AsyncSession, dataset: Path, actor_id: int) -> dic
 async def load_rule_sets(
     session: AsyncSession, dataset: Path, index: dict[str, Any], rules: dict[str, Any], actor_id: int
 ) -> dict[str, Any]:
-    """载入规则集与迭代绑定，返回 name -> id 索引。"""
+    """载入规则集，返回 name -> id 索引。"""
     from iterd.plugins.rules import services as rule_services
 
     data = read_json(dataset / "规则集.json")
@@ -279,14 +266,6 @@ async def load_rule_sets(
             name=item["name"],
             description=item.get("description", ""),
             rule_ids=rule_ids,
-        )
-    for binding in data.get("bindings", []):
-        iteration = index["iterations"][(binding["project_code"], int(binding["iteration_number"]))]
-        await rule_services.bind_rule_set(
-            session,
-            actor_id=actor_id,
-            rule_set_id=sets[binding["rule_set_name"]].id,
-            iteration_id=iteration.id,
         )
     await session.commit()
     return sets
@@ -360,88 +339,6 @@ async def load_dataset(session: AsyncSession, dataset: Path, *, actor_id: int) -
     }
 
 
-async def run_checks_sync(
-    session: AsyncSession, dataset: Path, loaded: dict[str, Any], *, actor_id: int
-) -> list[dict[str, Any]]:
-    """对数据集绑定的迭代同步执行规则检查（seed 预置展示用，与 worker 同一执行路径）。"""
-    from iterd.plugins.rules import services as rule_services
-    from iterd.plugins.rules.models import CheckRun
-
-    index, sets = loaded["index"], loaded["sets"]
-    results: list[dict[str, Any]] = []
-    # 预执行可能 rollback 使既有 ORM 对象过期，先固化全部入参再执行
-    plans: list[tuple[int, int, int]] = []
-    for binding in read_json(dataset / "规则集.json").get("bindings", []):
-        iteration = index["iterations"][(binding["project_code"], int(binding["iteration_number"]))]
-        plans.append((int(iteration.id), int(iteration.number), sets[binding["rule_set_name"]].id))
-    for iteration_id, iteration_number, rule_set_id in plans:
-        run, _task = await rule_services.create_check_run(
-            session,
-            actor_id=actor_id,
-            iteration_id=iteration_id,
-            rule_set_id=rule_set_id,
-        )
-        run_id = int(run.id)
-        try:
-            summary = await rule_services.execute_check_run(session, check_run_id=run_id)
-            results.append(
-                {"check_run_id": run_id, "iteration": iteration_number, "status": "succeeded", "summary": summary}
-            )
-        except Exception as exc:
-            await session.rollback()
-            failed = await session.get(CheckRun, run_id)
-            if failed is not None:
-                failed.status = "failed"
-                failed.summary = {"error": str(exc)[:200]}
-                await session.commit()
-            results.append({"check_run_id": run_id, "iteration": iteration_number, "status": "failed", "summary": None})
-    return results
-
-
-async def run_sims_sync(
-    session: AsyncSession, dataset: Path, loaded: dict[str, Any], *, actor_id: int
-) -> list[dict[str, Any]]:
-    """按仿真模板同步执行作业（绑定产物与迭代取自预期检查结果）。
-
-    边界数据集刻意包含参数非法作业（status=failed 为预期结果），逐个捕获不中断。
-    """
-    from iterd.plugins.simulation import services as sim_services
-    from iterd.plugins.simulation.models import SimJob
-
-    index, templates, versions = loaded["index"], loaded["templates"], loaded["versions"]
-    expected_data = read_json(dataset / "预期检查结果.json")
-    expected = {item["template_code"]: item for item in expected_data["expected_simulations"]}
-    iteration = index["iterations"][
-        (expected_data["iteration"]["project_code"], int(expected_data["iteration"]["number"]))
-    ]
-    # 预执行可能 rollback 使既有 ORM 对象过期，先固化全部入参再执行
-    iteration_id = int(iteration.id)
-    plans: list[tuple[str, int, int | None]] = []
-    for code, item in expected.items():
-        version = versions.get(item["bind_artifact_code"])
-        plans.append((code, int(templates[code].id), int(version.id) if version is not None else None))
-    results: list[dict[str, Any]] = []
-    for code, template_id, version_id in plans:
-        job, _task = await sim_services.create_sim_job(
-            session,
-            actor_id=actor_id,
-            iteration_id=iteration_id,
-            template_id=template_id,
-            artifact_version_id=version_id,
-        )
-        job_id = int(job.id)
-        try:
-            summary = await sim_services.execute_sim_job(session, job_id=job_id)
-            status = "succeeded"
-        except Exception:
-            await session.rollback()
-            failed = await session.get(SimJob, job_id)
-            status = failed.status if failed is not None else "failed"
-            summary = failed.summary if failed is not None else None
-        results.append({"job_id": job_id, "template": code, "status": status, "summary": summary})
-    return results
-
-
 async def run_workflows_sync(
     session: AsyncSession, dataset: Path, loaded: dict[str, Any], *, actor_id: int
 ) -> list[dict[str, Any]]:
@@ -498,15 +395,13 @@ async def run_workflows_sync(
 
 
 async def load_all_cases(session: AsyncSession, *, actor_id: int) -> list[dict[str, Any]]:
-    """载入全部典型案例（数据 + 同步预执行检查与仿真），返回逐数据集摘要。
+    """载入全部典型案例（数据 + 同步预执行审查流水线），返回逐数据集摘要。
 
     典型案例更新后重跑 ``iterd seed`` 即整体覆盖重建，新数据立即在界面展示。
     """
     results: list[dict[str, Any]] = []
     for dataset in list_datasets():
         loaded = await load_dataset(session, dataset, actor_id=actor_id)
-        checks = await run_checks_sync(session, dataset, loaded, actor_id=actor_id)
-        sims = await run_sims_sync(session, dataset, loaded, actor_id=actor_id)
         workflows = await run_workflows_sync(session, dataset, loaded, actor_id=actor_id)
         results.append(
             {
@@ -514,8 +409,6 @@ async def load_all_cases(session: AsyncSession, *, actor_id: int) -> list[dict[s
                 "projects": len(loaded["index"]["projects"]),
                 "iterations": len(loaded["index"]["iterations"]),
                 "artifacts": len(loaded["versions"]),
-                "checks": checks,
-                "sims": sims,
                 "workflows": workflows,
             }
         )

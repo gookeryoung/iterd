@@ -53,17 +53,6 @@ class RuleSetItem(Base, TimestampMixin):
     rule_item_id: Mapped[int] = mapped_column(ForeignKey("rule_items.id"), nullable=False)
 
 
-class RuleSetBinding(Base, TimestampMixin):
-    """规则集绑定：P0 绑定迭代."""
-
-    __tablename__ = "rule_set_bindings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    rule_set_id: Mapped[int] = mapped_column(ForeignKey("rule_sets.id"), index=True, nullable=False)
-    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
-    iteration_id: Mapped[int | None] = mapped_column(ForeignKey("iterations.id"), nullable=True)
-
-
 class CheckRun(Base, TimestampMixin):
     """检查运行：状态机 pending/running/succeeded/failed，summary 为计数."""
 
@@ -92,4 +81,4 @@ class CheckFinding(Base, TimestampMixin):
     message: Mapped[str] = mapped_column(String(1024), nullable=False)
 
 
-__all__ = ["CheckFinding", "CheckRun", "RuleItem", "RuleSet", "RuleSetBinding", "RuleSetItem"]
+__all__ = ["CheckFinding", "CheckRun", "RuleItem", "RuleSet", "RuleSetItem"]

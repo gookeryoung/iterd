@@ -159,28 +159,6 @@ export interface ArtifactVersion {
   created_at: string;
 }
 
-/** 基线条目。 */
-export interface BaselineItem {
-  id: number;
-  artifact_id: number;
-  artifact_version_id: number;
-}
-
-/** 基线。 */
-export interface Baseline {
-  id: number;
-  uid: string;
-  iteration_id: number;
-  name: string;
-  created_by: number | null;
-  created_at: string;
-}
-
-/** 基线详情（含快照条目）。 */
-export interface BaselineDetail extends Baseline {
-  items: BaselineItem[];
-}
-
 /** 规则分类。 */
 export type RuleCategory = 'drafting' | 'tolerance' | 'material' | 'process';
 
@@ -226,12 +204,6 @@ export interface RuleSet {
 /** 规则集详情（含成员规则 id）。 */
 export interface RuleSetDetail extends RuleSet {
   rule_ids: number[];
-}
-
-/** 迭代规则集绑定。 */
-export interface RuleSetBinding {
-  iteration_id: number;
-  rule_set_id: number | null;
 }
 
 /** 已注册检查器。 */
@@ -381,13 +353,6 @@ export interface SimJob {
   version_no: number | null;
 }
 
-/** 仿真作业发起入参。 */
-export interface SimJobInput {
-  template_id: number;
-  artifact_version_id?: number | null;
-  inputs?: Record<string, number | string> | null;
-}
-
 /** 仿真结果逐项判定明细。 */
 export interface SimResultDetail {
   key: string;
@@ -476,13 +441,31 @@ export interface WorkflowTemplateUpdateInput {
   enabled?: boolean;
 }
 
-/** 流水线作业日志行。 */
+/** 流水线作业日志行（ts 为相对作业开始的秒数，旧行可缺省）。 */
 export interface WorkflowJobLog {
+  ts?: number;
   level: string;
   message: string;
 }
 
-/** 流水线作业（含绑定展示字段）。 */
+/** 流水线步骤状态。 */
+export type WorkflowStepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
+
+/** 流水线步骤（作业内平台内置执行环节）。 */
+export interface WorkflowJobStep {
+  id: number;
+  job_id: number;
+  step_key: string;
+  name: string;
+  status: WorkflowStepStatus;
+  conclusion: WorkflowConclusion | null;
+  order_index: number;
+  logs: WorkflowJobLog[] | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** 流水线作业（含绑定展示字段与步骤序列）。 */
 export interface WorkflowJob {
   id: number;
   run_id: number;
@@ -505,6 +488,7 @@ export interface WorkflowJob {
   solver_type: string;
   artifact_code: string;
   version_no: number | null;
+  steps: WorkflowJobStep[];
 }
 
 /** 运行汇总（结论与计数聚合）。 */
@@ -514,6 +498,9 @@ export interface WorkflowRunSummary {
   findings: { error: number; warning: number; info: number };
   sims: { pass: number; fail: number };
 }
+
+/** 运行触发方式（GitHub Actions 语义：push=方案提交，手动=manual，rerun=重新运行）。 */
+export type WorkflowTrigger = 'submission' | 'manual' | 'rerun';
 
 /** 审查运行（含作业概要）。 */
 export interface WorkflowRun {
@@ -525,11 +512,31 @@ export interface WorkflowRun {
   status: WorkflowRunStatus;
   summary: WorkflowRunSummary | null;
   created_by: number | null;
+  submission_id: number | null;
+  trigger: WorkflowTrigger;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
   task_id: number | null;
+  submission_title: string;
   jobs: WorkflowJob[];
+}
+
+/** 提交迭代方案入参。 */
+export interface SubmissionInput {
+  title: string;
+  note?: string;
+}
+
+/** 提交方案（触发事件：每个启用模板各产生一条运行）。 */
+export interface IterationSubmission {
+  id: number;
+  iteration_id: number;
+  title: string;
+  note: string;
+  submitted_by: number | null;
+  created_at: string;
+  runs: WorkflowRun[];
 }
 
 /** 严重级别中文标签映射。 */

@@ -50,14 +50,6 @@ class SimTemplateOut(BaseModel):
     updated_at: datetime
 
 
-class SimJobIn(BaseModel):
-    """发起仿真作业入参."""
-
-    template_id: int
-    artifact_version_id: int | None = None
-    inputs: dict[str, Any] | None = None
-
-
 class SimJobOut(BaseModel):
     """仿真作业对外结构（template_name 由服务层填充）。"""
 

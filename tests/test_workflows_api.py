@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import time
 from pathlib import Path
 from typing import Any
@@ -322,6 +323,128 @@ def test_rerun_creates_new_run(client: TestClient) -> None:
     audits = client.get("/api/v1/audit-logs", params={"resource_type": "workflow_run"}).json()
     actions = {a["action"] for a in audits}
     assert {"workflow_run.create", "workflow_run.rerun"} <= actions
+
+
+# ---- 提交方案（submission 触发事件）----
+
+
+def test_submission_triggers_enabled_templates(client: TestClient) -> None:
+    scenario = _scenario(client, with_bad=False)
+    _prepare_capabilities(client, scenario, stress_max=100)
+    workflow = _create_workflow(client, scenario)
+    it_id = scenario["iteration"]["id"]
+
+    created = client.post(f"/api/v1/iterations/{it_id}/submissions", json={"title": "首轮方案", "note": "备注"})
+    assert created.status_code == 202, created.text
+    submission = created.json()
+    assert submission["title"] == "首轮方案" and submission["note"] == "备注"
+    assert submission["submitted_by"] is not None
+    # 为每个启用模板各产生一条 run（trigger=submission，归属提交）
+    assert len(submission["runs"]) == 1
+    run = submission["runs"][0]
+    assert run["trigger"] == "submission"
+    assert run["submission_id"] == submission["id"]
+    assert run["submission_title"] == "首轮方案"
+    final = _wait_run(client, run["id"])
+    assert final["status"] == "succeeded", final
+
+    # 手动发起与 rerun：trigger 字段区分，rerun 继承提交归属
+    manual = client.post(f"/api/v1/iterations/{it_id}/workflow-runs", json={"workflow_id": workflow["id"]}).json()
+    assert manual["trigger"] == "manual" and manual["submission_id"] is None
+    rerun = client.post(f"/api/v1/workflow-runs/{manual['id']}/rerun").json()
+    assert rerun["trigger"] == "rerun"
+
+    # 提交列表（降序）与详情：嵌触发的运行
+    listed = client.get(f"/api/v1/iterations/{it_id}/submissions").json()
+    assert [s["id"] for s in listed] == [submission["id"]]
+    assert listed[0]["runs"][0]["id"] == run["id"]
+    got = client.get(f"/api/v1/submissions/{submission['id']}")
+    assert got.status_code == 200 and got.json()["runs"]
+    assert client.get("/api/v1/submissions/99999").status_code == 404
+
+    # 审计：submission.create 已记录
+    audits = client.get("/api/v1/audit-logs", params={"resource_type": "iteration_submission"}).json()
+    assert any(a["action"] == "submission.create" for a in audits)
+
+
+def test_submission_state_and_rbac(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"code": "SUB", "name": "提交项目"}).json()
+    iteration = client.post(f"/api/v1/projects/{project['id']}/iterations", json={"title": "迭代"}).json()
+    it_id = iteration["id"]
+
+    # planned 迭代不可提交（422）
+    early = client.post(f"/api/v1/iterations/{it_id}/submissions", json={"title": "早期提交"})
+    assert early.status_code == 422, early.text
+    assert early.json()["code"] == "ITERD-INVALID_STATE"
+
+    # 无启用模板：提交成功且 runs 为空
+    client.patch(f"/api/v1/iterations/{it_id}", json={"title": "迭代", "status": "active"})
+    empty = client.post(f"/api/v1/iterations/{it_id}/submissions", json={"title": "空提交"}).json()
+    assert empty["runs"] == []
+
+    # 非项目成员 designer：403
+    login_as(client, "designer", "designer123")
+    denied = client.post(f"/api/v1/iterations/{it_id}/submissions", json={"title": "越权提交"})
+    assert denied.status_code == 403, denied.text
+    assert client.get(f"/api/v1/iterations/{it_id}/submissions").status_code == 403
+    # 迭代不存在：404
+    assert client.post("/api/v1/iterations/99999/submissions", json={"title": "x"}).status_code == 404
+
+
+# ---- AC-2/AC-3 步骤层级与日志行语义 ----
+
+
+def test_steps_sequence_logs_and_skip_semantics(client: TestClient) -> None:
+    scenario = _scenario(client, with_bad=True)
+    _prepare_capabilities(client, scenario, stress_max=100)
+    workflow = _create_workflow(client, scenario)
+    created = client.post(
+        f"/api/v1/iterations/{scenario['iteration']['id']}/workflow-runs", json={"workflow_id": workflow["id"]}
+    )
+    final = _wait_run(client, created.json()["id"])
+    assert final["status"] == "failed", final
+
+    jobs = {j["job_key"]: j for j in final["jobs"]}
+
+    # rules 作业：setup/check/report 内置序列，红 X 落在 report（执行成功但结论未过）
+    rules_steps = jobs["rules-check"]["steps"]
+    assert [s["step_key"] for s in rules_steps] == ["setup", "check", "report"]
+    assert all(s["status"] == "succeeded" for s in rules_steps)
+    assert rules_steps[0]["conclusion"] == "success"
+    assert rules_steps[2]["conclusion"] == "failure"
+    report_logs = rules_steps[2]["logs"] or []
+    assert any(entry["level"] == "error" and "error 级发现项" in entry["message"] for entry in report_logs)
+
+    # 步骤日志行：ts 相对作业开始秒数且非降序，level ∈ info/warning/error
+    all_logs = [entry for step in rules_steps for entry in (step["logs"] or [])]
+    assert all_logs
+    assert all(isinstance(entry.get("ts"), (int, float)) and entry["ts"] >= 0 for entry in all_logs)
+    assert all(b["ts"] >= a["ts"] for a, b in itertools.pairwise(all_logs))
+    assert all(entry["level"] in ("info", "warning", "error") for entry in all_logs)
+
+    # simulation 作业被 needs 门禁跳过：步骤全部 skipped
+    sim_steps = jobs["beam-sim"]["steps"]
+    assert [s["step_key"] for s in sim_steps] == ["setup", "solve", "evaluate"]
+    assert all(s["status"] == "skipped" and s["conclusion"] == "skipped" for s in sim_steps)
+    assert all(not (s["logs"] or []) for s in sim_steps)
+
+
+def test_steps_conclusion_on_sim_fail(client: TestClient) -> None:
+    """仿真超阈：solve 执行成功，红 X 落在 evaluate 步骤。"""
+    scenario = _scenario(client, with_bad=False)
+    _prepare_capabilities(client, scenario, stress_max=10)
+    workflow = _create_workflow(client, scenario)
+    created = client.post(
+        f"/api/v1/iterations/{scenario['iteration']['id']}/workflow-runs", json={"workflow_id": workflow["id"]}
+    )
+    final = _wait_run(client, created.json()["id"])
+    assert final["status"] == "failed", final
+    jobs = {j["job_key"]: j for j in final["jobs"]}
+    sim_steps = {s["step_key"]: s for s in jobs["beam-sim"]["steps"]}
+    assert sim_steps["solve"]["conclusion"] == "success"
+    assert sim_steps["evaluate"]["conclusion"] == "failure"
+    evaluate_logs = sim_steps["evaluate"]["logs"] or []
+    assert any(entry["level"] == "error" and "超阈" in entry["message"] for entry in evaluate_logs)
 
 
 def test_workflow_rbac(client: TestClient) -> None:

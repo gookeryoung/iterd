@@ -1,15 +1,16 @@
 """示例数据集载入脚本：把 examples/datasets/项目-XXX 写入 iterd（演示 / 联调 / 备份样本生成）.
 
 数据载入逻辑在 :mod:`iterd.example_datasets`（与 ``iterd seed`` 共用），
-本脚本提供独立入口：指定单个数据集、可选执行规则检查与仿真（进程内 worker）。
+本脚本提供独立入口：指定单个数据集、可选提交迭代方案触发审查流水线（进程内 worker）。
 
 用法::
 
-    uv run python scripts/load_example.py                       # 载入默认数据集
-    uv run python scripts/load_example.py --with-check --with-sim  # 附带执行规则检查与仿真
+    uv run python scripts/load_example.py                  # 仅载入数据
+    uv run python scripts/load_example.py --with-review    # 载入后按审查模板 runs 节提交方案并等待终态
     uv run python scripts/load_example.py --data-dir .iterd-example --database-url sqlite+aiosqlite:///./demo.db
 
-数据部分幂等：项目 / 规则 / 规则集 / 模板按编码或名称跳过已存在记录，重复执行只补充缺失部分。
+数据部分幂等：项目 / 规则 / 规则集 / 模板按编码或名称跳过已存在记录，重复执行只补充缺失部分；
+``--with-review`` 每次执行均会新增一次提交方案（runs 每次提交都产生新的运行结果）。
 整体覆盖重建请直接使用 ``iterd seed``。
 """
 
@@ -31,103 +32,129 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", default=str(DEFAULT_DATASET), help="数据集目录路径")
     parser.add_argument("--data-dir", default=None, help="iterd 数据目录（默认 .iterd-example）")
     parser.add_argument("--database-url", default=None, help="覆盖数据库连接串")
-    parser.add_argument("--with-check", action="store_true", help="载入后对绑定迭代执行规则检查")
-    parser.add_argument("--with-sim", action="store_true", help="载入后按仿真模板发起作业")
-    parser.add_argument("--with-workflow", action="store_true", help="载入后按审查模板发起流水线运行")
+    parser.add_argument(
+        "--with-review",
+        action="store_true",
+        help="载入后按审查模板 runs 节提交迭代方案，触发审查流水线并等待终态",
+    )
     return parser
 
 
-async def _wait_terminal(factory: Any, kind: str, entity_id: int) -> dict[str, Any]:
-    """轮询至终态并返回最新状态（worker 异步执行）。"""
-    from iterd.plugins.rules.models import CheckRun
-    from iterd.plugins.simulation.models import SimJob
+async def _wait_terminal(factory: Any, run_id: int) -> dict[str, Any]:
+    """轮询审查运行至终态并返回最新状态（in-app worker 异步执行）。"""
     from iterd.plugins.workflows.models import WorkflowRun
 
-    model = {"check": CheckRun, "sim": SimJob, "workflow": WorkflowRun}[kind]
-    for _ in range(120):
+    for _ in range(240):
         async with factory() as session:
-            entity = await session.get(model, entity_id)
-            if entity is not None and entity.status in ("succeeded", "failed"):
-                return {"status": entity.status, "summary": entity.summary, "error": getattr(entity, "error", None)}
+            run = await session.get(WorkflowRun, run_id)
+            if run is not None and run.status in ("succeeded", "failed"):
+                return {"status": run.status, "summary": run.summary}
         await asyncio.sleep(0.5)
-    return {"status": "timeout", "summary": None, "error": None}
+    return {"status": "timeout", "summary": None}
 
 
-async def _run_checks(factory: Any, dataset: Path, index: dict[str, Any], sets: dict[str, Any]) -> None:
-    """对绑定迭代执行规则检查（进程内 worker，任务记录与界面进度一致）。"""
-    from iterd.example_datasets import read_json
-    from iterd.plugins.rules import services as rule_services
+async def _print_run_jobs(factory: Any, run_id: int) -> None:
+    """打印运行内各作业结论：规则作业输出 CheckRun summary，仿真作业输出 verdict。"""
+    from iterd.plugins.rules.models import CheckRun
+    from iterd.plugins.simulation.models import SimJob
+    from iterd.plugins.workflows.models import WorkflowJob
 
-    bindings = read_json(dataset / "规则集.json").get("bindings", [])
-    for binding in bindings:
-        iteration = index["iterations"][(binding["project_code"], int(binding["iteration_number"]))]
-        async with factory() as session:
-            run, _task = await rule_services.create_check_run(
-                session,
-                actor_id=1,
-                iteration_id=iteration.id,
-                rule_set_id=sets[binding["rule_set_name"]].id,
-            )
-            await session.commit()
-            run_id = run.id
-        state = await _wait_terminal(factory, "check", run_id)
-        print(f"检查运行 #{run_id}（迭代 {iteration.number}）：{state['status']} {state['summary']}")
-
-
-async def _run_simulations(
-    factory: Any,
-    dataset: Path,
-    index: dict[str, Any],
-    templates: dict[str, Any],
-    versions: dict[str, Any],
-) -> None:
-    """按仿真模板发起作业（绑定产物与迭代取自预期检查结果）。"""
-    from iterd.example_datasets import read_json
-    from iterd.plugins.simulation import services as sim_services
-
-    expected_data = read_json(dataset / "预期检查结果.json")
-    expected = {item["template_code"]: item for item in expected_data["expected_simulations"]}
-    iteration = index["iterations"][
-        (expected_data["iteration"]["project_code"], int(expected_data["iteration"]["number"]))
-    ]
-    for code, item in expected.items():
-        version = versions.get(item["bind_artifact_code"])
-        async with factory() as session:
-            job, _task = await sim_services.create_sim_job(
-                session,
-                actor_id=1,
-                iteration_id=iteration.id,
-                template_id=templates[code].id,
-                artifact_version_id=version.id if version is not None else None,
-            )
-            await session.commit()
-            job_id = job.id
-        state = await _wait_terminal(factory, "sim", job_id)
-        print(f"仿真作业 #{job_id}（{code}）：{state['status']} {state['summary']} {state['error'] or ''}")
+    async with factory() as session:
+        jobs = list(
+            (
+                await session.execute(
+                    WorkflowJob.__table__.select().where(WorkflowJob.run_id == run_id).order_by(WorkflowJob.order_index)
+                )
+            ).mappings()
+        )
+        for job in jobs:
+            name = job["name"] or job["job_key"]
+            if job["check_run_id"] is not None:
+                check_run = await session.get(CheckRun, int(job["check_run_id"]))
+                summary = dict(check_run.summary or {}) if check_run is not None else {}
+                print(
+                    f"    {name}: {summary.get('error', 0)} error / {summary.get('warning', 0)} warning / "
+                    f"{summary.get('info', 0)} info（产物 {summary.get('artifacts', 0)} / 规则 {summary.get('rules', 0)}）"
+                )
+            elif job["sim_job_id"] is not None:
+                sim_job = await session.get(SimJob, int(job["sim_job_id"]))
+                if sim_job is None:
+                    print(f"    {name}: 仿真作业缺失")
+                    continue
+                summary = dict(sim_job.summary or {})
+                raw_failures = summary.get("failures") or []
+                failed_keys: list[str] = []
+                if isinstance(raw_failures, list):
+                    failed_keys = [item["key"] for item in raw_failures if isinstance(item, dict) and "key" in item]
+                # else: 计数形态（超阈指标数），无明细键
+                print(
+                    f"    {name}: {sim_job.status} verdict={summary.get('verdict', '-')}"
+                    + (
+                        f" failed_keys={failed_keys}"
+                        if failed_keys
+                        else (f" failures={raw_failures}" if isinstance(raw_failures, int) and raw_failures else "")
+                    )
+                )
+            else:
+                print(f"    {name}: {job['status']}")
 
 
-async def _run_workflows(factory: Any, dataset: Path, index: dict[str, Any], workflows: dict[str, Any]) -> None:
-    """按审查模板发起流水线运行（进程内 worker，进度与界面一致）。"""
+async def _run_review(factory: Any, dataset: Path) -> None:
+    """按审查模板 runs 节定位迭代并提交方案（进程内 worker 执行，轮询至终态）。"""
+    from iterd.core.config import get_settings
     from iterd.example_datasets import read_yaml
+    from iterd.plugins.accounts.services import get_by_username
     from iterd.plugins.workflows import services as workflow_services
 
     path = dataset / "审查模板.yaml"
     if not path.is_file():
+        print("数据集无 审查模板.yaml，跳过审查提交")
         return
-    for run in read_yaml(path).get("runs", []):
-        iteration = index["iterations"][(run["project_code"], int(run["iteration_number"]))]
-        async with factory() as session:
-            workflow_run, _task = await workflow_services.create_workflow_run(
+    runs = read_yaml(path).get("runs", [])
+    if not runs:
+        print("审查模板.yaml 无 runs 节，跳过审查提交")
+        return
+
+    settings = get_settings()
+    submissions: dict[tuple[str, int], list[int]] = {}
+    async with factory() as session:
+        admin = await get_by_username(session, settings.admin_username)
+        assert admin is not None
+        for run in runs:
+            from iterd.plugins.projects import services as project_services
+
+            project = next(
+                (p for p in await project_services.list_projects(session) if p.code == run["project_code"]), None
+            )
+            assert project is not None, f"项目不存在: {run['project_code']}"
+            iterations = await project_services.list_iterations(session, project.id)
+            iteration = next((it for it in iterations if it.number == int(run["iteration_number"])), None)
+            assert iteration is not None, f"迭代不存在: {run['project_code']} #{run['iteration_number']}"
+            key = (run["project_code"], int(run["iteration_number"]))
+            if key in submissions:
+                continue
+            submission, created = await workflow_services.create_submission(
                 session,
-                actor_id=1,
-                iteration_id=iteration.id,
-                template_id=workflows[run["workflow_code"]].id,
+                actor_id=int(admin.id),
+                iteration_id=int(iteration.id),
+                title=f"示例提交（{run['project_code']} 迭代 {run['iteration_number']}）",
+                note="load_example --with-review 预置提交",
             )
             await session.commit()
-            run_id = workflow_run.id
-        state = await _wait_terminal(factory, "workflow", run_id)
-        conclusion = (state["summary"] or {}).get("conclusion", "-")
-        print(f"审查运行 #{run_id}（{run['workflow_code']}）：{state['status']} conclusion={conclusion}")
+            submissions[key] = [int(r.id) for r in created]
+            print(
+                f"提交方案 #{submission.id}（{run['project_code']} 迭代 {run['iteration_number']}）：{len(created)} 条运行"
+            )
+
+    for (project_code, number), run_ids in submissions.items():
+        for run_id in run_ids:
+            state = await _wait_terminal(factory, run_id)
+            summary = state["summary"] or {}
+            print(
+                f"  审查运行 #{run_id}（{project_code} 迭代 {number}）：{state['status']} "
+                f"conclusion={summary.get('conclusion', '-')}"
+            )
+            await _print_run_jobs(factory, run_id)
 
 
 async def _load(dataset: Path, args: argparse.Namespace) -> None:
@@ -140,8 +167,6 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     # 触发全部模型注册（含 simulation 与 tasks）
     from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace, workflows  # noqa: F401
     from iterd.plugins.accounts.services import get_by_username
-    from iterd.plugins.rules import services as rule_services
-    from iterd.plugins.simulation import services as sim_services
     from iterd.plugins.workflows import services as workflow_services
     from iterd.seed import ensure_admin
     from iterd.tasks import models as task_models  # noqa: F401
@@ -156,9 +181,7 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     print(f"数据库: {settings.database_url}")
 
     worker = None
-    if args.with_check or args.with_sim or args.with_workflow:
-        rule_services.register_executors()
-        sim_services.register_executors()
+    if args.with_review:
         workflow_services.register_executors()
         worker = await runner.start_in_app_worker()
 
@@ -184,12 +207,8 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
         )
         print(f"用户就绪: {settings.admin_username} / {' / '.join(DEMO_USERS)}")
 
-        if args.with_check:
-            await _run_checks(factory, dataset, index, sets)
-        if args.with_sim:
-            await _run_simulations(factory, dataset, index, templates, versions)
-        if args.with_workflow:
-            await _run_workflows(factory, dataset, index, workflows)
+        if args.with_review:
+            await _run_review(factory, dataset)
     finally:
         if worker is not None:
             await runner.stop_in_app_worker(worker)

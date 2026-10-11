@@ -1,4 +1,8 @@
-"""simulation 端到端测试：求解器清单 → 模板 → 作业（worker 执行）→ 结果评估 → 溯源 → 审计."""
+"""simulation 端到端测试：求解器清单 → 模板 → 流水线仿真作业 → 结果评估 → 溯源 → 审计.
+
+动态仿真的唯一触发入口是审查流水线（simulation/run 作业），本文件经
+workflow-run 触达仿真执行链路；sim-jobs / result 读端点直接断言。
+"""
 
 from __future__ import annotations
 
@@ -8,17 +12,6 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from tests.conftest import login_as
-
-
-def _wait_job(client: TestClient, job_id: int) -> dict[str, Any]:
-    """轮询作业直至终态。"""
-    final: dict[str, Any] = {}
-    for _ in range(50):
-        final = client.get(f"/api/v1/sim-jobs/{job_id}").json()
-        if final["status"] in ("succeeded", "failed"):
-            return final
-        time.sleep(0.2)
-    return final
 
 
 def _scenario(client: TestClient) -> dict[str, Any]:
@@ -34,6 +27,39 @@ def _scenario(client: TestClient) -> dict[str, Any]:
         f"/api/v1/artifacts/{artifact['id']}/versions", files={"file": ("SIM-BEAM_revA.step", b"model")}
     ).json()
     return {"project": project, "iteration": iteration, "artifact": artifact, "version": version}
+
+
+def _create_sim_workflow(
+    client: TestClient, scenario: dict[str, Any], template_code: str, code: str, inputs: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """创建单 simulation 作业审查模板（按模板编码 + 产物编码引用）。"""
+    with_ = f"template: {template_code}, artifact: SIM-BEAM"
+    if inputs is not None:
+        pairs = ", ".join(f"{k}: {v}" for k, v in inputs.items())
+        with_ = f"{with_}, inputs: {{{pairs}}}"
+    definition = f"name: 仿真审查\njobs:\n  sim:\n    uses: simulation/run\n    with: {{{with_}}}\n"
+    workflow = client.post(
+        "/api/v1/workflows",
+        json={"code": code, "name": "仿真审查", "project_id": scenario["project"]["id"], "definition": definition},
+    )
+    assert workflow.status_code == 201, workflow.text
+    return workflow.json()
+
+
+def _run_workflow(client: TestClient, scenario: dict[str, Any], workflow_id: int) -> dict[str, Any]:
+    """发起运行并轮询至终态。"""
+    created = client.post(
+        f"/api/v1/iterations/{scenario['iteration']['id']}/workflow-runs", json={"workflow_id": workflow_id}
+    )
+    assert created.status_code == 202, created.text
+    run_id = created.json()["id"]
+    final: dict[str, Any] = {}
+    for _ in range(50):
+        final = client.get(f"/api/v1/workflow-runs/{run_id}").json()
+        if final["status"] in ("succeeded", "failed"):
+            return final
+        time.sleep(0.2)
+    return final
 
 
 def test_solvers_manifest(client: TestClient) -> None:
@@ -94,7 +120,7 @@ def test_sim_job_flow_and_evaluation(client: TestClient) -> None:
     scene = _scenario(client)
     iteration_id = scene["iteration"]["id"]
 
-    template = client.post(
+    client.post(
         "/api/v1/sim-templates",
         json={
             "code": "BEAM-CHECK",
@@ -105,21 +131,16 @@ def test_sim_job_flow_and_evaluation(client: TestClient) -> None:
         },
     ).json()
 
-    # 未产出结果时 404
-    job = client.post(
-        f"/api/v1/iterations/{iteration_id}/sim-jobs",
-        json={"template_id": template["id"], "artifact_version_id": scene["version"]["id"]},
-    )
-    assert job.status_code == 202, job.text
-    job_id = job.json()["id"]
-    assert job.json()["task_id"] is not None
-    assert job.json()["template_name"] == "梁校核"
-    assert job.json()["artifact_code"] == "SIM-BEAM"
-    assert client.get(f"/api/v1/sim-jobs/{job_id}/result").status_code == 404
-
-    done = _wait_job(client, job_id)
-    assert done["status"] == "succeeded", done
-    assert done["summary"] == {"metrics": 3, "failures": 0, "verdict": "pass"}
+    # 经流水线发起首个仿真（未产出结果时 result 404 先行断言）
+    workflow = _create_sim_workflow(client, scene, "BEAM-CHECK", "SIM-REVIEW")
+    final = _run_workflow(client, scene, workflow["id"])
+    assert final["status"] == "succeeded", final
+    job_id = next(j["sim_job_id"] for j in final["jobs"] if j["job_type"] == "simulation")
+    job = client.get(f"/api/v1/sim-jobs/{job_id}").json()
+    assert job["template_name"] == "梁校核"
+    assert job["artifact_code"] == "SIM-BEAM"
+    assert client.get(f"/api/v1/sim-jobs/{job_id}/result").status_code != 404
+    assert job["summary"] == {"metrics": 3, "failures": 0, "verdict": "pass"}
 
     result = client.get(f"/api/v1/sim-jobs/{job_id}/result").json()
     assert result["verdict"] == "pass" and result["failures"] == 0
@@ -128,19 +149,13 @@ def test_sim_job_flow_and_evaluation(client: TestClient) -> None:
     assert result["metrics"]["max_stress"] == 23.4375
     assert all(item["passed"] for item in result["detail"])
 
-    # 加大载荷至 5000N：max_stress = 117.1875 > 100 → 判定失败
-    second = client.post(
-        f"/api/v1/iterations/{iteration_id}/sim-jobs",
-        json={
-            "template_id": template["id"],
-            "artifact_version_id": scene["version"]["id"],
-            "inputs": {"load": 5000},
-        },
-    ).json()
-    second_id = second["id"]
-    failed_done = _wait_job(client, second_id)
-    assert failed_done["status"] == "succeeded"
-    assert failed_done["summary"]["verdict"] == "fail"
+    # with.inputs 覆盖载荷至 5000N：max_stress = 117.1875 > 100 → 作业判定 failure
+    heavy = _create_sim_workflow(client, scene, "BEAM-CHECK", "SIM-HEAVY", inputs={"load": 5000})
+    failed_final = _run_workflow(client, scene, heavy["id"])
+    assert failed_final["status"] == "failed", failed_final
+    failed_job = next(j for j in failed_final["jobs"] if j["job_type"] == "simulation")
+    assert failed_job["conclusion"] == "failure"
+    second_id = int(failed_job["sim_job_id"])
     failed_result = client.get(f"/api/v1/sim-jobs/{second_id}/result").json()
     assert failed_result["failures"] == 1
     assert failed_result["metrics"]["max_stress"] == 117.1875
@@ -168,13 +183,13 @@ def test_sim_job_flow_and_evaluation(client: TestClient) -> None:
 
     assert asyncio.run(_count()) == 2
 
-    audits = client.get("/api/v1/audit-logs", params={"resource_type": "sim_job"}).json()
-    assert audits and audits[0]["action"] == "sim_job.create"
+    audits = client.get("/api/v1/audit-logs", params={"resource_type": "workflow_run"}).json()
+    assert any(a["action"] == "workflow_run.create" for a in audits)
 
 
 def test_sim_job_invalid_inputs_failed(client: TestClient) -> None:
     scene = _scenario(client)
-    template = client.post(
+    client.post(
         "/api/v1/sim-templates",
         json={
             "code": "BEAM-BAD",
@@ -183,50 +198,54 @@ def test_sim_job_invalid_inputs_failed(client: TestClient) -> None:
             "project_id": scene["project"]["id"],
         },
     ).json()
-    job = client.post(
-        f"/api/v1/iterations/{scene['iteration']['id']}/sim-jobs",
-        json={"template_id": template["id"], "inputs": {"load": "not-a-number"}},
-    ).json()
+    workflow = _create_sim_workflow(client, scene, "BEAM-BAD", "SIM-BAD", inputs={"load": "not-a-number"})
+    final = _run_workflow(client, scene, workflow["id"])
 
-    done = _wait_job(client, job["id"])
-    assert done["status"] == "failed"
-    assert "不是数值" in (done["error"] or "")
-    assert client.get(f"/api/v1/sim-jobs/{job['id']}/result").status_code == 404
+    assert final["status"] == "failed"
+    failed_job = next(j for j in final["jobs"] if j["job_type"] == "simulation")
+    sim_job = client.get(f"/api/v1/sim-jobs/{failed_job['sim_job_id']}").json()
+    assert sim_job["status"] == "failed"
+    assert "不是数值" in (sim_job["error"] or "")
+    assert client.get(f"/api/v1/sim-jobs/{sim_job['id']}/result").status_code == 404
 
-    tasks = client.get("/api/v1/tasks", params={"status": "failed"}).json()
-    assert tasks and tasks[0]["task_type"] == "sim_job"
+    tasks = client.get("/api/v1/tasks", params={"status": "succeeded", "limit": 100}).json()
+    workflow_tasks = [t for t in tasks if t["task_type"] == "workflow_run"]
+    assert workflow_tasks  # 业务失败（阈值/异常兜底）不等于系统失败：任务本身成功完成
 
 
 def test_sim_job_edges(client: TestClient) -> None:
     scene = _scenario(client)
     iteration_id = scene["iteration"]["id"]
-    template = client.post(
+    client.post(
         "/api/v1/sim-templates",
         json={"code": "EDGE-1", "name": "边界模板", "solver_type": "beam_static", "project_id": scene["project"]["id"]},
-    ).json()
+    )
 
     assert client.get("/api/v1/sim-jobs/99999").status_code == 404
     assert client.get("/api/v1/sim-jobs/99999/result").status_code == 404
     assert client.get("/api/v1/iterations/99999/sim-jobs").status_code == 404
     assert client.get(f"/api/v1/iterations/{iteration_id}/sim-jobs").json() == []
 
-    bad_template = client.post(f"/api/v1/iterations/{iteration_id}/sim-jobs", json={"template_id": 99999})
-    assert bad_template.status_code == 404
-    bad_version = client.post(
-        f"/api/v1/iterations/{iteration_id}/sim-jobs",
-        json={"template_id": template["id"], "artifact_version_id": 99999},
-    )
-    assert bad_version.status_code == 404
+    # 独立发起端点已移除（405 守卫）
+    assert client.post(f"/api/v1/iterations/{iteration_id}/sim-jobs", json={"template_id": 99999}).status_code == 405
 
-    # 非成员 designer 不能发起作业
+    # 引用不存在的仿真模板：发起时 422 早失败
+    workflow = _create_sim_workflow(client, scene, "NO-SUCH", "SIM-BAD-REF")
+    resp = client.post(f"/api/v1/iterations/{iteration_id}/workflow-runs", json={"workflow_id": workflow["id"]})
+    assert resp.status_code == 422
+
+    # 非成员 designer 不能发起流水线运行
+    enabled = _create_sim_workflow(client, scene, "EDGE-1", "SIM-EDGE")
     login_as(client, "designer", "designer123")
-    denied = client.post(f"/api/v1/iterations/{iteration_id}/sim-jobs", json={"template_id": template["id"]})
+    denied = client.post(f"/api/v1/iterations/{iteration_id}/workflow-runs", json={"workflow_id": enabled["id"]})
     assert denied.status_code == 403
 
 
 def test_template_patch(client: TestClient) -> None:
     """仿真模板 PATCH：部分更新 / 求解器校验 / RBAC / 停用门禁 / 404。"""
     project = client.post("/api/v1/projects", json={"code": "PTP", "name": "PATCH 项目"}).json()
+    iteration = client.post(f"/api/v1/projects/{project['id']}/iterations", json={"title": "迭代"}).json()
+    client.patch(f"/api/v1/iterations/{iteration['id']}", json={"title": "迭代", "status": "active"})
     template = client.post(
         "/api/v1/sim-templates",
         json={
@@ -262,11 +281,19 @@ def test_template_patch(client: TestClient) -> None:
     assert switched.json()["params"] == {"torque": 300}
     assert switched.json()["thresholds"] is None
 
-    # 停用模板不可发起作业
-    iteration = client.post(f"/api/v1/projects/{project['id']}/iterations", json={"title": "迭代"}).json()
-    disabled = client.post(f"/api/v1/iterations/{iteration['id']}/sim-jobs", json={"template_id": template_id})
-    assert disabled.status_code == 400
-    assert "ITERD-INVALID_STATE" in disabled.text
+    # 停用模板不可经流水线发起（发起时 422 早失败）
+    workflow = client.post(
+        "/api/v1/workflows",
+        json={
+            "code": "PTP-REVIEW",
+            "name": "PATCH 审查",
+            "project_id": project["id"],
+            "definition": "name: PATCH 审查\njobs:\n  sim:\n    uses: simulation/run\n    with: {template: PTP-BEAM}\n",
+        },
+    ).json()
+    disabled = client.post(f"/api/v1/iterations/{iteration['id']}/workflow-runs", json={"workflow_id": workflow["id"]})
+    assert disabled.status_code == 422
+    assert "ITERD-INVALID_DEFINITION" in disabled.text
 
     # 空体 PATCH：无字段变更仍成功
     noop = client.patch(f"/api/v1/sim-templates/{template_id}", json={})

@@ -9,7 +9,6 @@ import type {
   RuleInput,
   RuleItem,
   RuleSet,
-  RuleSetBinding,
   RuleSetDetail,
   RuleSetInput,
   Severity,
@@ -64,29 +63,6 @@ export async function fetchRuleSet(id: number): Promise<RuleSetDetail> {
 /** 向规则集批量添加规则。 */
 export async function addRulesToSet(id: number, ruleIds: number[]): Promise<RuleSetDetail> {
   const resp = await api.post<RuleSetDetail>(`/rule-sets/${id}/rules`, { rule_ids: ruleIds });
-  return resp.data;
-}
-
-/** 绑定规则集到迭代（后端 201）。 */
-export async function bindRuleSet(ruleSetId: number, iterationId: number): Promise<RuleSet> {
-  const resp = await api.post<RuleSet>(`/rule-sets/${ruleSetId}/bind`, { iteration_id: iterationId });
-  return resp.data;
-}
-
-/** 查询迭代已绑定的规则集。 */
-export async function fetchRuleSetBinding(iterationId: number): Promise<RuleSetBinding> {
-  const resp = await api.get<RuleSetBinding>(`/iterations/${iterationId}/rule-set-binding`);
-  return resp.data;
-}
-
-/** 发起检查（后端 202，返回待执行的 CheckRun）。 */
-export async function createCheckRun(
-  iterationId: number,
-  ruleSetId: number,
-): Promise<CheckRun> {
-  const resp = await api.post<CheckRun>(`/iterations/${iterationId}/check-runs`, {
-    rule_set_id: ruleSetId,
-  });
   return resp.data;
 }
 
