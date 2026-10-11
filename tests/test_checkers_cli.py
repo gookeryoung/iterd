@@ -159,8 +159,9 @@ def test_cli_seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytes
     from iterd.cli import main
 
     assert main(["seed"]) == 0
-    assert "演示数据注入完成" in capsys.readouterr().out
-    # 幂等
+    out = capsys.readouterr().out
+    assert "覆盖式重建完成" in out
+    # 覆盖重建：重复执行整体重建，同样成功
     assert main(["seed"]) == 0
     cfg.reset_settings(None)
     dbmod.reset_database()

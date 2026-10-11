@@ -253,8 +253,14 @@ def test_seed_ensure_admin(env: Path) -> None:
     from iterd.core.config import get_settings
     from iterd.core.database import get_engine, get_session_factory
     from iterd.models import Base
-    from iterd.plugins import accounts, artifacts, projects, rules, trace  # noqa: F401
+    from iterd.plugins.accounts import models as accounts_models  # noqa: F401
     from iterd.plugins.accounts.models import User, UserRole
+    from iterd.plugins.artifacts import models as artifacts_models  # noqa: F401
+    from iterd.plugins.notify import models as notify_models  # noqa: F401
+    from iterd.plugins.projects import models as projects_models  # noqa: F401
+    from iterd.plugins.rules import models as rules_models  # noqa: F401
+    from iterd.plugins.simulation import models as simulation_models  # noqa: F401
+    from iterd.plugins.trace import models as trace_models  # noqa: F401
     from iterd.seed import ensure_admin, seed
     from iterd.tasks import models as task_models  # noqa: F401
 

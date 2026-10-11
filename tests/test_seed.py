@@ -1,4 +1,4 @@
-"""seed 演示数据测试：全流程内容齐备 + 幂等."""
+"""seed 演示数据测试：覆盖式重建 + 全流程内容齐备 + 典型案例载入."""
 
 from __future__ import annotations
 
@@ -17,10 +17,16 @@ from iterd.seed import seed
 
 @pytest.fixture()
 def store(env: Path) -> Generator[tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]], None, None]:
-    """隔离数据库建表并连跑两次 seed（验证幂等），返回 (session factory, 首次摘要)."""
+    """隔离数据库建表并连跑两次 seed（验证覆盖重建），返回 (session factory, 首次摘要)."""
     from iterd.core.config import get_settings
     from iterd.core.database import get_engine, get_session_factory
-    from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace  # noqa: F401
+    from iterd.plugins.accounts import models as accounts_models  # noqa: F401
+    from iterd.plugins.artifacts import models as artifacts_models  # noqa: F401
+    from iterd.plugins.notify import models as notify_models  # noqa: F401
+    from iterd.plugins.projects import models as projects_models  # noqa: F401
+    from iterd.plugins.rules import models as rules_models  # noqa: F401
+    from iterd.plugins.simulation import models as simulation_models  # noqa: F401
+    from iterd.plugins.trace import models as trace_models  # noqa: F401
     from iterd.tasks import models as task_models  # noqa: F401
 
     engine = get_engine(get_settings().database_url)
@@ -114,21 +120,72 @@ def test_seed_demo_flow_content(
     assert any(f.rule_item_id == draft.id and f.severity == "error" for f in items)
 
 
-def test_seed_idempotent(store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]]) -> None:
-    """重复 seed 不产生重复数据：规则 2 条 / 规则集 1 个 / 迭代 2 个 / 检查运行 1 次."""
-    _maker, _first, second = store
-    from iterd.plugins.projects.models import Iteration
+def test_seed_overwrite_rebuild(
+    store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
+) -> None:
+    """重复 seed 覆盖重建：业务数据清空重建无残留、无重复，账号与审计日志保留."""
+    from iterd.plugins.accounts.models import User
+    from iterd.plugins.projects.models import Iteration, Project
     from iterd.plugins.rules.models import CheckRun, RuleItem, RuleSet
 
-    # 二次执行摘要：全部跳过
-    assert second["demo_flow"] == {
-        "rule_set": False,
-        "binding": False,
-        "activated": False,
-        "baseline": False,
-        "check_run_id": None,
-    }
-    assert len(_rows(select(RuleItem))) == 2
-    assert len(_rows(select(RuleSet))) == 1
-    assert len(_rows(select(Iteration))) == 2
-    assert len(_rows(select(CheckRun))) == 1
+    _maker, _first, second = store
+
+    # 二次执行摘要：演示流程内容全部重建
+    flow = second["demo_flow"]
+    assert flow["rule_set"] is True
+    assert flow["binding"] is True
+    assert flow["activated"] is True
+    assert flow["baseline"] is True
+    assert flow["check_run_id"] is not None
+    assert all(not u["created"] for u in second["users"])  # 账号沿用，不重复建号
+
+    # 无残留无重复：DEMO 项目仅 1 个、演示迭代 2 个、规则编码唯一、规则集仅演示 1 个 + 案例 N 个
+    assert len([p for p in _rows(select(Project)) if p.code == "DEMO"]) == 1
+    demo = next(p for p in _rows(select(Project)) if p.code == "DEMO")
+    assert len(_rows(select(Iteration).where(Iteration.project_id == demo.id))) == 2
+    rule_codes = [r.code for r in _rows(select(RuleItem))]
+    assert len(rule_codes) == len(set(rule_codes))
+    assert len(_rows(select(RuleSet))) == len({rs.name for rs in _rows(select(RuleSet))})
+
+    # 演示迭代检查运行重建为 1 次（旧运行已随覆盖清空）
+    from iterd.plugins.projects.models import Iteration as IterationModel
+
+    demo_iters = _rows(
+        select(IterationModel).where(IterationModel.project_id == demo.id).order_by(IterationModel.number)
+    )
+    runs = _rows(select(CheckRun).where(CheckRun.iteration_id == demo_iters[0].id))
+    assert len(runs) == 1
+
+    # 用户与审计日志保留
+    assert len(_rows(select(User))) >= 6
+
+
+def test_seed_typical_cases(
+    store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
+) -> None:
+    """seed 载入全部典型案例：数据集项目齐备，检查/仿真已预执行至终态."""
+    from iterd.example_datasets import list_datasets
+    from iterd.plugins.projects.models import Project
+    from iterd.plugins.rules.models import CheckRun
+    from iterd.plugins.simulation.models import SimJob
+
+    if not list_datasets():
+        pytest.skip("非源码仓库（无 examples/datasets），跳过典型案例断言")
+
+    _maker, summary, _second = store
+    cases = summary["cases"]
+    assert len(cases) == len(list_datasets())
+
+    # 数据集项目齐备（CVY/TRL/AXLE/BND 四个典型场景）
+    codes = {p.code for p in _rows(select(Project))}
+    assert {"CVY-2026", "TRL-2026", "AXLE-2026", "BND-2026"} <= codes
+
+    # 每个数据集的检查运行均已成功（发现项与仿真结论打开界面即见）
+    runs = _rows(select(CheckRun))
+    assert runs
+    assert all(r.status == "succeeded" for r in runs)
+
+    # 仿真作业均到终态（边界数据集的 failed 为预期结果）
+    jobs = _rows(select(SimJob))
+    assert jobs
+    assert all(j.status in ("succeeded", "failed") for j in jobs)

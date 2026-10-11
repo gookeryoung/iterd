@@ -83,7 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
     worker = sub.add_parser("worker", help="启动独立任务 worker（可多实例）")
     worker.add_argument("--worker-id", default=None)
 
-    sub.add_parser("seed", help="注入演示数据")
+    sub.add_parser("seed", help="覆盖式重建演示数据并载入典型案例（examples/datasets，更新数据集后重跑即生效）")
 
     backup = sub.add_parser("backup", help="创建数据备份（.tar.gz 归档）")
     backup.add_argument("--output", default=None, help="归档输出路径，默认 ~/.iterd/backups")
@@ -274,7 +274,7 @@ def _prepare_db() -> None:
 
 
 def cmd_seed() -> None:
-    """注入演示数据（三员 + 普通用户账号 + 示例项目/规则），过程信息与账号清单随命令输出."""
+    """覆盖式重建演示数据并载入典型案例，账号清单与案例统计随命令输出."""
     from iterd.core.config import get_settings
     from iterd.core.database import get_engine, get_session_factory
     from iterd.seed import seed
@@ -291,9 +291,9 @@ def cmd_seed() -> None:
             return result
 
     summary = asyncio.run(_run())
-    print("[seed] 演示数据注入完成，登录账号（三员 + 普通用户）：")
+    print("[seed] 覆盖式重建完成（业务数据已清空重建，用户与审计日志保留），登录账号（三员 + 普通用户）：")
     for item in summary["users"]:
-        mark = "新建" if item["created"] else "已有"
+        mark = "新建" if item["created"] else "沿用"
         print(f"  {item['role']}: {item['username']} / {item['password']}  ({mark})")
     flow = summary.get("demo_flow") or {}
     if flow:
@@ -305,6 +305,16 @@ def cmd_seed() -> None:
             f"基线{'新建' if flow.get('baseline') else '沿用'} / "
             f"检查运行{'#' + str(flow['check_run_id']) if flow.get('check_run_id') else '沿用'}"
         )
+    cases = summary.get("cases") or []
+    if cases:
+        print(f"[seed] 典型案例（{len(cases)} 个数据集，检查/仿真已预执行，打开界面即可查看）：")
+        for case in cases:
+            print(
+                f"  {case['name']}：项目 {case['projects']} / 迭代 {case['iterations']} / "
+                f"产物 {case['artifacts']} / 检查 {len(case['checks'])} / 仿真 {len(case['sims'])}"
+            )
+    else:
+        print("[seed] 未找到 examples/datasets（非源码仓库），跳过典型案例载入")
 
 
 def cmd_info() -> None:

@@ -1,4 +1,9 @@
-"""演示数据 seed：三员 + 普通用户账号 + 示例项目/迭代/规则/产物.
+"""演示数据 seed：覆盖式重建（对标 cndb seed）+ 典型案例数据集载入.
+
+覆盖模式：每次执行先清空业务数据（项目/迭代/产物/规则/规则集/检查/仿真/任务/溯源，
+保留用户与审计日志），再重建三员 + 普通用户账号、演示项目全流程内容，并载入
+``examples/datasets/`` 下全部典型案例（含同步预执行规则检查与仿真），
+典型案例数据集更新后重跑 ``iterd seed`` 即可立即在界面展示。
 
 三员模型参考 GB/T 22239 等级保护（对标 cndb seed 设计）：
 - 系统管理员（admin，超级管理员）：系统配置、用户与项目管理
@@ -6,8 +11,8 @@
 - 审计管理员（audit_admin）：审计日志、合规检查
 - 普通用户（demo / designer）：日常业务操作
 
-seed 全程幂等：按用户名/既有数据查重，已存在跳过；每一步打印过程信息，
-返回摘要 dict 供 CLI 输出账号清单。
+账号按用户名查重建号（已存在沿用），口令与 seed 内置/配置口令不符时对齐并告警；
+每一步打印过程信息，返回摘要 dict 供 CLI 输出账号清单与典型案例统计。
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ import io
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from iterd.core.security import hash_password, verify_password
@@ -43,6 +48,32 @@ _DEMO_RULE_SET_NAME = "演示规则集"
 # 预置基线名称
 _DEMO_BASELINE_NAME = "BL-首轮迭代"
 
+# 覆盖时保留的表：账号与审计日志（只增不改）
+_KEEP_TABLES = frozenset({"users", "audit_logs"})
+
+
+async def _reset_business_data(session: AsyncSession) -> int:
+    """清空全部业务表（覆盖式重建前置，对标 cndb seed），返回清空表数量.
+
+    按依赖逆序删除（子表在前）；用户与审计日志保留，保证账号体系与审计痕迹延续。
+    """
+    from iterd.models import Base
+    from iterd.plugins.accounts import models as accounts_models  # noqa: F401
+    from iterd.plugins.artifacts import models as artifacts_models  # noqa: F401
+    from iterd.plugins.notify import models as notify_models  # noqa: F401
+    from iterd.plugins.projects import models as projects_models  # noqa: F401
+    from iterd.plugins.rules import models as rules_models  # noqa: F401
+    from iterd.plugins.simulation import models as simulation_models  # noqa: F401
+    from iterd.plugins.trace import models as trace_models  # noqa: F401
+    from iterd.tasks import models as task_models  # noqa: F401
+
+    tables = [t for t in reversed(Base.metadata.sorted_tables) if t.name not in _KEEP_TABLES]
+    for table in tables:
+        await session.execute(delete(table))
+    await session.commit()
+    logger.info("[seed] 覆盖模式：已清空 %s 张业务表（保留 users / audit_logs）", len(tables))
+    return len(tables)
+
 
 async def _ensure_user(  # noqa: PLR0913 - 幂等建号参数
     session: AsyncSession,
@@ -54,11 +85,16 @@ async def _ensure_user(  # noqa: PLR0913 - 幂等建号参数
     is_superuser: bool = False,
     summary: list[dict[str, Any]],
 ) -> Any:
-    """按用户名幂等创建演示用户，过程信息写入日志与摘要."""
+    """按用户名幂等创建演示用户，口令与内置不符时对齐，过程信息写入日志与摘要."""
     existing = await get_by_username(session, username)
     if existing is not None:
-        logger.info("[seed] 用户已存在，跳过: %s (角色: %s)", username, role.display_name)
-        summary.append({"username": username, "password": "（沿用既有）", "role": role.display_name, "created": False})
+        mark = "（沿用既有）"
+        if not verify_password(password, existing.hashed_password):
+            existing.hashed_password = hash_password(password)
+            mark = "（口令已对齐）"
+            logger.warning("[seed] 用户 %s 已存在，口令与演示口令不符，已对齐", username)
+        logger.info("[seed] 用户已存在，跳过创建: %s (角色: %s)", username, role.display_name)
+        summary.append({"username": username, "password": password + mark, "role": role.display_name, "created": False})
         return existing
     user = await create_user(
         session, username=username, password=password, email=email, is_superuser=is_superuser, role=role.value
@@ -69,12 +105,15 @@ async def _ensure_user(  # noqa: PLR0913 - 幂等建号参数
 
 
 async def seed(session: AsyncSession, *, admin_username: str, admin_password: str) -> dict[str, Any]:
-    """注入演示数据（幂等），返回摘要：用户清单与各业务对象数量."""
+    """覆盖式注入演示数据与典型案例，返回摘要：用户清单、演示流程与案例统计."""
     summary: list[dict[str, Any]] = []
-    logger.info("[seed] 开始注入演示数据 ...")
+    logger.info("[seed] 开始覆盖式注入演示数据 ...")
+
+    # 覆盖模式：清空业务数据后整体重建（对标 cndb seed；用户与审计日志保留）
+    await _reset_business_data(session)
 
     # 用户：三员账号（系统管理员=超级管理员 + 安全管理员 + 审计管理员）+ 普通用户
-    logger.info("[seed] 步骤 1/3：创建三员与普通用户账号")
+    logger.info("[seed] 步骤 1/5：创建三员与普通用户账号")
     admin = await _ensure_user(
         session,
         admin_username,
@@ -87,125 +126,136 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
     for username, password, role in _DEMO_USERS:
         await _ensure_user(session, username, password, role=role, email=f"{username}@iterd.local", summary=summary)
 
-    # 示例项目/迭代/产物
-    logger.info("[seed] 步骤 2/3：创建示例项目与产物")
-    projects = await project_services.list_projects(session)
-    if not projects:
-        project = await project_services.create_project(
-            session,
-            actor_id=admin.id,
-            parent_id=None,
-            code="DEMO",
-            name="演示项目",
-            description="IterD 演示数据",
-            status="active",
-        )
-        logger.info("[seed] 创建项目: %s (%s)", project.name, project.code)
+    # 示例项目/迭代/产物（覆盖重建后业务表为空，直接创建）
+    logger.info("[seed] 步骤 2/5：创建示例项目与产物")
+    project = await project_services.create_project(
+        session,
+        actor_id=admin.id,
+        parent_id=None,
+        code="DEMO",
+        name="演示项目",
+        description="IterD 演示数据",
+        status="active",
+    )
+    logger.info("[seed] 创建项目: %s (%s)", project.name, project.code)
+    await project_services.upsert_member(
+        session, actor_id=admin.id, project_id=project.id, user_id=admin.id, role="owner"
+    )
+    designer = await get_by_username(session, "designer")
+    if designer is not None:
         await project_services.upsert_member(
-            session, actor_id=admin.id, project_id=project.id, user_id=admin.id, role="owner"
+            session, actor_id=admin.id, project_id=project.id, user_id=designer.id, role="designer"
         )
-        designer = await get_by_username(session, "designer")
-        if designer is not None:
-            await project_services.upsert_member(
-                session, actor_id=admin.id, project_id=project.id, user_id=designer.id, role="designer"
-            )
-            logger.info("[seed] 添加项目成员: designer → 演示项目 (designer)")
-        demo = await get_by_username(session, "demo")
-        if demo is not None:
-            await project_services.upsert_member(
-                session, actor_id=admin.id, project_id=project.id, user_id=demo.id, role="viewer"
-            )
-            logger.info("[seed] 添加项目成员: demo → 演示项目 (viewer)")
-        reviewer = await get_by_username(session, "reviewer")
-        if reviewer is not None:
-            await project_services.upsert_member(
-                session, actor_id=admin.id, project_id=project.id, user_id=reviewer.id, role="reviewer"
-            )
-            logger.info("[seed] 添加项目成员: reviewer → 演示项目 (reviewer)")
-        iteration = await project_services.create_iteration(
-            session,
-            actor_id=admin.id,
-            project_id=project.id,
-            title="第一轮迭代",
-            objective="完成概念设计并通过规则检查",
+        logger.info("[seed] 添加项目成员: designer → 演示项目 (designer)")
+    demo = await get_by_username(session, "demo")
+    if demo is not None:
+        await project_services.upsert_member(
+            session, actor_id=admin.id, project_id=project.id, user_id=demo.id, role="viewer"
         )
-        logger.info("[seed] 创建迭代: %s", iteration.title)
-        artifact = await artifact_services.create_artifact(
-            session,
-            actor_id=admin.id,
-            project_id=project.id,
-            iteration_id=iteration.id,
-            code="DEMO-001",
-            name="示例零件图",
-            category="drawing",
-            description="演示产物",
+        logger.info("[seed] 添加项目成员: demo → 演示项目 (viewer)")
+    reviewer = await get_by_username(session, "reviewer")
+    if reviewer is not None:
+        await project_services.upsert_member(
+            session, actor_id=admin.id, project_id=project.id, user_id=reviewer.id, role="reviewer"
         )
-        logger.info("[seed] 创建产物: %s (%s)", artifact.name, artifact.code)
-        await artifact_services.upload_version(
-            session,
-            actor_id=admin.id,
-            artifact=artifact,
-            filename="DEMO-001_rev-A.dwg",
-            content_type="application/octet-stream",
-            stream=io.BytesIO(b"demo dwg content"),
-            metadata={"材料": "Q235", "尺寸": "100x50x10", "公差": "±0.1"},
-        )
-        logger.info("[seed] 上传产物版本: %s (rev A)", artifact.code)
-        # 规划态迭代：供演示「激活」等状态流转操作
-        planned = await project_services.create_iteration(
-            session,
-            actor_id=admin.id,
-            project_id=project.id,
-            title="第二轮迭代",
-            objective="保持规划态，供演示「激活」等状态流转操作",
-        )
-        logger.info("[seed] 创建迭代: %s (planned)", planned.title)
-    else:
-        logger.info("[seed] 已存在项目数据，跳过项目/迭代/产物注入")
+        logger.info("[seed] 添加项目成员: reviewer → 演示项目 (reviewer)")
+    iteration = await project_services.create_iteration(
+        session,
+        actor_id=admin.id,
+        project_id=project.id,
+        title="第一轮迭代",
+        objective="完成概念设计并通过规则检查",
+    )
+    logger.info("[seed] 创建迭代: %s", iteration.title)
+    artifact = await artifact_services.create_artifact(
+        session,
+        actor_id=admin.id,
+        project_id=project.id,
+        iteration_id=iteration.id,
+        code="DEMO-001",
+        name="示例零件图",
+        category="drawing",
+        description="演示产物",
+    )
+    logger.info("[seed] 创建产物: %s (%s)", artifact.name, artifact.code)
+    await artifact_services.upload_version(
+        session,
+        actor_id=admin.id,
+        artifact=artifact,
+        filename="DEMO-001_rev-A.dwg",
+        content_type="application/octet-stream",
+        stream=io.BytesIO(b"demo dwg content"),
+        metadata={"材料": "Q235", "尺寸": "100x50x10", "公差": "±0.1"},
+    )
+    logger.info("[seed] 上传产物版本: %s (rev A)", artifact.code)
+    # 规划态迭代：供演示「激活」等状态流转操作
+    planned = await project_services.create_iteration(
+        session,
+        actor_id=admin.id,
+        project_id=project.id,
+        title="第二轮迭代",
+        objective="保持规划态，供演示「激活」等状态流转操作",
+    )
+    logger.info("[seed] 创建迭代: %s (planned)", planned.title)
 
     # 演示规则
-    logger.info("[seed] 步骤 3/4：创建演示规则")
-    rules = await rule_services.list_rules(session)
-    if not rules:
-        await rule_services.create_rule(
-            session,
-            actor_id=admin.id,
-            code="DRAFT-001",
-            name="图纸文件名规范",
-            category="drafting",
-            checker_type="filename_convention",
-            params={"pattern": r"^[A-Z0-9-]+_rev[A-Z]\.\w+$"},
-            severity_default="error",
-        )
-        logger.info("[seed] 创建规则: DRAFT-001 图纸文件名规范")
-        await rule_services.create_rule(
-            session,
-            actor_id=admin.id,
-            code="MATERIAL-001",
-            name="材料元数据必填",
-            category="material",
-            checker_type="metadata_required",
-            params={"required": {"材料": "str", "尺寸": "str", "公差": "str"}},
-            severity_default="error",
-        )
-        logger.info("[seed] 创建规则: MATERIAL-001 材料元数据必填")
-    else:
-        logger.info("[seed] 已存在规则数据，跳过规则注入")
+    logger.info("[seed] 步骤 3/5：创建演示规则")
+    await rule_services.create_rule(
+        session,
+        actor_id=admin.id,
+        code="DRAFT-001",
+        name="图纸文件名规范",
+        category="drafting",
+        checker_type="filename_convention",
+        params={"pattern": r"^[A-Z0-9-]+_rev[A-Z]\.\w+$"},
+        severity_default="error",
+    )
+    logger.info("[seed] 创建规则: DRAFT-001 图纸文件名规范")
+    await rule_services.create_rule(
+        session,
+        actor_id=admin.id,
+        code="MATERIAL-001",
+        name="材料元数据必填",
+        category="material",
+        checker_type="metadata_required",
+        params={"required": {"材料": "str", "尺寸": "str", "公差": "str"}},
+        severity_default="error",
+    )
+    logger.info("[seed] 创建规则: MATERIAL-001 材料元数据必填")
 
     # 演示全流程内容：规则集 / 绑定 / 迭代激活 / 基线 / 预置检查运行
-    logger.info("[seed] 步骤 4/4：完善演示全流程内容")
+    logger.info("[seed] 步骤 4/5：完善演示全流程内容")
     demo_flow = await _ensure_demo_flow(session, actor_id=admin.id)
 
+    # 典型案例：examples/datasets 全量载入并预执行检查/仿真（非源码仓库自动跳过）
+    logger.info("[seed] 步骤 5/5：载入典型案例数据集")
+    from iterd.example_datasets import datasets_root, load_all_cases
+
+    if datasets_root() is None:
+        cases: list[dict[str, Any]] = []
+        logger.info("[seed] 非源码仓库（未找到 examples/datasets），跳过典型案例载入")
+    else:
+        cases = await load_all_cases(session, actor_id=admin.id)
+        for case in cases:
+            logger.info(
+                "[seed] 典型案例 %s：项目 %s / 迭代 %s / 产物 %s / 检查 %s / 仿真 %s",
+                case["name"],
+                case["projects"],
+                case["iterations"],
+                case["artifacts"],
+                len(case["checks"]),
+                len(case["sims"]),
+            )
+
     logger.info("[seed] 演示数据注入完成：共 %s 个账号（三员 + 普通用户）", len(summary))
-    return {"users": summary, "demo_flow": demo_flow}
+    return {"users": summary, "demo_flow": demo_flow, "cases": cases}
 
 
 async def _ensure_demo_flow(session: AsyncSession, *, actor_id: int) -> dict[str, Any]:
-    """确保演示全流程内容齐备：规则集 / 绑定 / 迭代激活 / 基线 / 预置检查运行。
+    """确保演示全流程内容齐备：规则集 / 绑定 / 迭代激活 / 基线 / 预置检查运行.
 
-    全部幂等（按名称 / 既有数据查重，已存在跳过）；非演示库（无 DEMO 项目或迭代）整体跳过。
-    预置检查运行在 seed 会话内直接执行（与 worker 同一执行路径），保证打开界面即有
-    已完成的检查运行与发现项，全流程可演示。
+    全部幂等（按名称 / 既有数据查重）；预置检查运行在 seed 会话内直接执行
+    （与 worker 同一执行路径），保证打开界面即有已完成的检查运行与发现项。
     """
     from iterd.plugins.rules.models import CheckRun
 
@@ -277,9 +327,9 @@ async def _ensure_demo_flow(session: AsyncSession, *, actor_id: int) -> dict[str
         check_run, _task = await rule_services.create_check_run(
             session, actor_id=actor_id, iteration_id=iteration.id, rule_set_id=rule_set.id
         )
-        summary = await rule_services.execute_check_run(session, check_run_id=check_run.id)
+        run_summary = await rule_services.execute_check_run(session, check_run_id=check_run.id)
         flow["check_run_id"] = check_run.id
-        logger.info("[seed] 预置检查运行 #%s 完成：%s", check_run.id, summary)
+        logger.info("[seed] 预置检查运行 #%s 完成：%s", check_run.id, run_summary)
     else:
         logger.info("[seed] 迭代已有检查运行，跳过预置检查")
     return flow
