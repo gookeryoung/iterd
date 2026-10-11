@@ -254,6 +254,13 @@ def test_gate_chain_failure_skips_downstream(client: TestClient) -> None:
     assert jobs["rules-check"]["conclusion"] == "failure"
     assert jobs["rules-check"]["check_run_id"] is not None
     assert final["summary"]["findings"]["error"] == 2
+    # 发现项明细可见：通过作业绑定的 CheckRun 拉取，含规则/产物/消息（前端明细表数据源）
+    detail = client.get(f"/api/v1/check-runs/{jobs['rules-check']['check_run_id']}/findings")
+    assert detail.status_code == 200, detail.text
+    errors = [f for f in detail.json() if f["severity"] == "error"]
+    assert {f["rule_code"] for f in errors} == {"WF-FN", "WF-MD"}
+    assert {f["artifact_code"] for f in errors} == {"BAD-1"}
+    assert all(f["message"] for f in errors)
     # 门禁：下游 skipped（AC-3）
     assert jobs["beam-sim"]["status"] == "skipped"
     assert jobs["beam-sim"]["conclusion"] == "skipped"

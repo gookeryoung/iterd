@@ -65,6 +65,19 @@ def _rows(stmt: Any) -> list[Any]:
     return asyncio.run(_run())
 
 
+def _row_tuples(stmt: Any) -> list[tuple[Any, ...]]:
+    """在独立会话中执行多列 ORM 查询并返回 Row 列表."""
+    from iterd.core.config import get_settings
+    from iterd.core.database import get_engine, get_session_factory
+
+    async def _run() -> list[Any]:
+        maker = get_session_factory(get_engine(get_settings().database_url))
+        async with maker() as session:
+            return list((await session.execute(stmt)).all())
+
+    return asyncio.run(_run())
+
+
 def test_seed_demo_flow_content(
     store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
 ) -> None:
@@ -156,9 +169,12 @@ def test_seed_typical_cases(
     store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
 ) -> None:
     """seed 载入全部典型案例：数据集项目齐备，检查/仿真已预执行至终态."""
+    import json
+
     from iterd.example_datasets import list_datasets
-    from iterd.plugins.projects.models import Project
-    from iterd.plugins.rules.models import CheckRun
+    from iterd.plugins.artifacts.models import Artifact, ArtifactVersion
+    from iterd.plugins.projects.models import Iteration, Project
+    from iterd.plugins.rules.models import CheckFinding, CheckRun, RuleItem, RuleSet
     from iterd.plugins.simulation.models import SimJob
 
     if not list_datasets():
@@ -181,3 +197,61 @@ def test_seed_typical_cases(
     jobs = _rows(select(SimJob))
     assert jobs
     assert all(j.status in ("succeeded", "failed") for j in jobs)
+
+    # 发现项与数据集基线一致：逐数据集比对 CheckRun summary 与 finding 明细
+    # （规则/级别/产物/位置与消息，保证"检查问题存在发现项时界面上可见具体内容"）
+    for dataset in list_datasets():
+        baseline = json.loads((dataset / "预期检查结果.json").read_text(encoding="utf-8"))
+        proj = _rows(select(Project).where(Project.code == baseline["iteration"]["project_code"]))[0]
+        iteration = _rows(
+            select(Iteration).where(
+                Iteration.project_id == proj.id, Iteration.number == baseline["iteration"]["number"]
+            )
+        )[0]
+        # 规则集可能是全局（project_id 为空）或项目级，通过 CheckRun 联 RuleSet 按名称定位
+        check_runs = _row_tuples(
+            select(CheckRun, RuleSet)
+            .join(RuleSet, CheckRun.rule_set_id == RuleSet.id)
+            .where(CheckRun.iteration_id == iteration.id, RuleSet.name == baseline["rule_set"])
+        )
+        if not check_runs:
+            # 该数据集 runs 未预执行 rules/check（如 AXLE 全绿仿真演示），基线仅供手动门禁模板演示
+            continue
+        assert len(check_runs) == 1, f"{dataset.name}: 检查运行数量异常"
+        check_run = check_runs[0][0]
+
+        run_summary = dict(check_run.summary or {})
+        for key, want in baseline["expected_summary"].items():
+            assert run_summary.get(key) == want, f"{dataset.name}: summary.{key}={run_summary.get(key)} 期望 {want}"
+
+        actual = [
+            {
+                "rule_code": rule_code,
+                "severity": finding.severity,
+                "artifact_code": artifact_code,
+                "location": finding.location,
+                "message": finding.message,
+            }
+            for finding, rule_code, artifact_code in _row_tuples(
+                select(CheckFinding, RuleItem.code, Artifact.code)
+                .join(RuleItem, CheckFinding.rule_item_id == RuleItem.id)
+                .join(ArtifactVersion, CheckFinding.artifact_version_id == ArtifactVersion.id)
+                .join(Artifact, ArtifactVersion.artifact_id == Artifact.id)
+                .where(CheckFinding.check_run_id == check_run.id)
+            )
+        ]
+        expected = baseline["expected_findings"]
+        assert len(actual) == len(expected), f"{dataset.name}: 发现项 {len(actual)} 条，基线 {len(expected)} 条"
+        for item in expected:
+            matched = [
+                a
+                for a in actual
+                if a["rule_code"] == item["rule_code"]
+                and a["severity"] == item["severity"]
+                and a["artifact_code"] == item["artifact_code"]
+                and a["location"] == item["location"]
+            ]
+            assert matched, f"{dataset.name}: 基线发现项缺失 {item['rule_code']}@{item['artifact_code']}"
+            assert any(item["message_contains"] in a["message"] for a in matched), (
+                f"{dataset.name}: {item['rule_code']}@{item['artifact_code']} 消息不含 {item['message_contains']!r}"
+            )
