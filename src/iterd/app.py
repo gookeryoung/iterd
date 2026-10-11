@@ -93,10 +93,15 @@ def create_app() -> FastAPI:
     app.include_router(notify_routers.router)
     app.include_router(tasks_api.router)
 
-    @app.get("/", include_in_schema=False)
-    def read_root() -> dict[str, str]:
-        """根路径健康检查."""
-        return {"status": "ok", "project": "iterd"}
+    static_dir = Path(__file__).parent / "static"
+    has_build = (static_dir / "index.html").is_file()
+
+    if not has_build:
+        # 无前端构建产物时根路径保留 JSON 健康检查；有产物时由 SPA 挂载接管（对齐 cndb serve）
+        @app.get("/", include_in_schema=False)
+        def read_root() -> dict[str, str]:
+            """根路径健康检查."""
+            return {"status": "ok", "project": "iterd"}
 
     _mount_spa(app)
     return app

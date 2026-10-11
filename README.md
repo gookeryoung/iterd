@@ -69,6 +69,24 @@ make clean    # 清理构建产物
 make bump patch  # 版本号 bump
 ```
 
+### 前端开发与构建（dev / build / serve）
+
+前端位于 `frontend/`（Vite + React + TypeScript + AntD，pnpm 管理），后端 FastAPI 同源托管构建产物。三个 CLI 命令覆盖完整开发链路（对标 cndb 前端工程化体系）：
+
+```bash
+# 开发模式：同时启动后端（uvicorn --reload，端口 8000）与前端（vite 热更新，端口 5173）
+# 浏览器访问 http://127.0.0.1:5173，/api 与 /ws 由 Vite 代理转发到后端，Ctrl+C 一键停止全部服务
+iterd dev
+
+# 构建前端：tsc 类型检查 + vite build，产物输出到 src/iterd/static/（随 wheel 分发）
+iterd build
+
+# 生产预览：uvicorn 启动并同源托管 static/ 构建产物，根路径即前端首页，SPA 路由回退
+iterd serve
+```
+
+约定：后端 dev 默认端口 8000 须与 `frontend/vite.config.ts` 的代理目标一致；无构建产物时 `iterd serve` 根路径返回 JSON 健康检查。`make build` 会先执行前端构建再打包 wheel。
+
 
 ## 文档
 
