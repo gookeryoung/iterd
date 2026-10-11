@@ -252,7 +252,7 @@ def test_seed_ensure_admin(env: Path) -> None:
     from iterd.core.database import get_engine, get_session_factory
     from iterd.models import Base
     from iterd.plugins import accounts, artifacts, projects, rules, trace  # noqa: F401
-    from iterd.plugins.accounts.models import User
+    from iterd.plugins.accounts.models import User, UserRole
     from iterd.seed import ensure_admin, seed
     from iterd.tasks import models as task_models  # noqa: F401
 
@@ -266,11 +266,29 @@ def test_seed_ensure_admin(env: Path) -> None:
 
     async def _run() -> None:
         async with factory() as session:
-            await seed(session, admin_username="root", admin_password="root123")
+            summary = await seed(session, admin_username="root", admin_password="root123")
             await session.commit()
-            # 幂等：重复 seed 跳过
-            await seed(session, admin_username="root", admin_password="root123")
+            # 三员 + 普通用户账号齐全
+            roles = {u["username"]: u["role"] for u in summary["users"]}
+            assert roles == {
+                "root": "系统管理员",
+                "sec_admin": "安全管理员",
+                "audit_admin": "审计管理员",
+                "designer": "普通用户",
+                "demo": "普通用户",
+            }
+            # 幂等：重复 seed 跳过（账号清单不变，全部标记"沿用既有"）
+            summary2 = await seed(session, admin_username="root", admin_password="root123")
             await session.commit()
+            assert {u["username"]: u["role"] for u in summary2["users"]} == roles
+            assert all(not u["created"] for u in summary2["users"])
+            # 数据库角色值校验
+            rows = (await session.execute(select(User.username, User.role))).all()
+            role_map = {r.username: r.role for r in rows}
+            assert role_map["root"] == UserRole.SYSTEM_ADMIN.value
+            assert role_map["sec_admin"] == UserRole.SECURITY_ADMIN.value
+            assert role_map["audit_admin"] == UserRole.AUDIT_ADMIN.value
+            assert role_map["demo"] == UserRole.USER.value
             # 非 bcrypt 口令哈希时重置
             session.add(User(username="legacy", hashed_password="plain", is_active=True))
             await session.commit()

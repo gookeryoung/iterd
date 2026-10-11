@@ -224,7 +224,7 @@ def _prepare_db() -> None:
 
 
 def cmd_seed() -> None:
-    """注入演示数据。"""
+    """注入演示数据（三员 + 普通用户账号 + 示例项目/规则），过程信息与账号清单随命令输出."""
     from iterd.core.config import get_settings
     from iterd.core.database import get_engine, get_session_factory
     from iterd.seed import seed
@@ -234,13 +234,17 @@ def cmd_seed() -> None:
     engine = get_engine(settings.database_url)
     factory = get_session_factory(engine)
 
-    async def _run() -> None:
+    async def _run() -> dict[str, Any]:
         async with factory() as session:
-            await seed(session, admin_username=settings.admin_username, admin_password=settings.admin_password)
+            result = await seed(session, admin_username=settings.admin_username, admin_password=settings.admin_password)
             await session.commit()
+            return result
 
-    asyncio.run(_run())
-    print("演示数据注入完成")
+    summary = asyncio.run(_run())
+    print("[seed] 演示数据注入完成，登录账号（三员 + 普通用户）：")
+    for item in summary["users"]:
+        mark = "新建" if item["created"] else "已有"
+        print(f"  {item['role']}: {item['username']} / {item['password']}  ({mark})")
 
 
 def cmd_info() -> None:

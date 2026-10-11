@@ -15,6 +15,10 @@ SCRIPT_LOCATION = Path(__file__).resolve().parent.parent / "alembic"
 # 存量库判定基准表：历史版本由 create_all 建表，无 alembic_version 记录
 _CORE_TABLE = "users"
 
+# 存量库 stamp 基线版本：对应 create_all 时代的初始表结构。
+# 后续新增迁移（如 0002 users.role）会在此基础上继续升级，存量库不漏迁移。
+_BASELINE_REVISION = "0001"
+
 # 异步驱动 → 同步驱动映射（alembic 迁移运行在同步引擎上）
 _ASYNC_DRIVERS = {
     "+aiosqlite": "",
@@ -48,7 +52,8 @@ def upgrade_head(database_url: str | None = None) -> None:
     """升级数据库到最新迁移（幂等，serve/seed/worker 启动前调用）.
 
     存量库兼容：若业务表已存在但无 alembic_version 记录（历史 create_all 建表），
-    先 stamp head 对齐迁移基线再升级，避免重复建表；新库直接 upgrade head。
+    先 stamp 到基线版本（0001）再升级，避免重复建表且不漏后续迁移；
+    新库直接 upgrade head。
     """
     import sqlalchemy
     from sqlalchemy.engine import make_url
@@ -63,7 +68,7 @@ def upgrade_head(database_url: str | None = None) -> None:
     try:
         inspector = sqlalchemy.inspect(engine)
         if _CORE_TABLE in inspector.get_table_names() and not inspector.has_table("alembic_version"):
-            command.stamp(cfg, "head")
+            command.stamp(cfg, _BASELINE_REVISION)
         command.upgrade(cfg, "head")
     finally:
         engine.dispose()

@@ -18,15 +18,17 @@ class UserOut(BaseModel):
     email: str
     is_superuser: bool
     is_active: bool
+    role: str
 
 
 class UserCreate(BaseModel):
-    """创建用户入参."""
+    """创建用户入参（role 取值见 UserRole：三员 + user）."""
 
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=6, max_length=64)
     email: str = ""
     is_superuser: bool = False
+    role: str = "user"
 
 
 class LoginIn(BaseModel):

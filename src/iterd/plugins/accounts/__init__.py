@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .models import ApiToken, User
+from .models import ApiToken, User, UserRole
 
-__all__ = ["ApiToken", "User"]
+__all__ = ["ApiToken", "User", "UserRole"]

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from iterd.core.errors import IterdError
 from iterd.core.security import hash_api_token, hash_password, verify_password
-from iterd.plugins.accounts.models import ApiToken, User
+from iterd.plugins.accounts.models import ApiToken, User, UserRole
 
 
 async def get_by_username(session: AsyncSession, username: str) -> User | None:
@@ -17,13 +17,33 @@ async def get_by_username(session: AsyncSession, username: str) -> User | None:
     return (await session.execute(select(User).where(User.username == username))).scalar_one_or_none()
 
 
-async def create_user(
-    session: AsyncSession, *, username: str, password: str, email: str = "", is_superuser: bool = False
+async def create_user(  # noqa: PLR0913 - 创建用户参数
+    session: AsyncSession,
+    *,
+    username: str,
+    password: str,
+    email: str = "",
+    is_superuser: bool = False,
+    role: str = UserRole.USER.value,
 ) -> User:
-    """创建用户；用户名重复抛 DUPLICATE_CODE。"""
+    """创建用户；用户名重复抛 DUPLICATE_CODE，角色非法抛 INVALID_ROLE。"""
     if await get_by_username(session, username) is not None:
         raise IterdError(f"用户名已存在: {username}", code="ITERD-DUPLICATE_CODE", status_code=400)
-    user = User(username=username, email=email, is_superuser=is_superuser, hashed_password=hash_password(password))
+    try:
+        UserRole(role)
+    except ValueError as exc:
+        raise IterdError(
+            f"非法角色: {role}（可选: {', '.join(m.value for m in UserRole)}）",
+            code="ITERD-INVALID_ROLE",
+            status_code=400,
+        ) from exc
+    user = User(
+        username=username,
+        email=email,
+        is_superuser=is_superuser,
+        role=UserRole(role).value,
+        hashed_password=hash_password(password),
+    )
     session.add(user)
     await session.flush()
     return user

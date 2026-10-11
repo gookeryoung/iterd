@@ -43,7 +43,10 @@ def test_upgrade_head_creates_all_tables_and_idempotent(env: Path) -> None:
 
 
 def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
-    """存量 create_all 库（有业务表、无 alembic_version）自动 stamp 后升级成功."""
+    """存量 create_all 库（有业务表、无 alembic_version）自动 stamp 基线后升级成功.
+
+    模拟 0001 时代库结构（users 无 role 列），stamp 0001 后升级到 0002 补齐 role 列。
+    """
     import asyncio
 
     from iterd.models import Base
@@ -57,6 +60,14 @@ def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
             await conn.run_sync(Base.metadata.create_all)
 
     asyncio.run(_create())
+    # 剥离 0002 新增列，还原为 0001 时代的存量库结构
+    engine = sa.create_engine(_sync_url())
+    try:
+        with engine.begin() as conn:
+            conn.execute(sa.text("DROP INDEX IF EXISTS ix_users_role"))
+            conn.execute(sa.text("ALTER TABLE users DROP COLUMN role"))
+    finally:
+        engine.dispose()
     assert "alembic_version" not in _table_names(_sync_url())
 
     upgrade_head()
@@ -64,6 +75,8 @@ def test_upgrade_head_stamps_legacy_create_all_db(env: Path) -> None:
     try:
         with engine.connect() as conn:
             version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
+            columns = {c["name"] for c in sa.inspect(conn).get_columns("users")}
     finally:
         engine.dispose()
-    assert version == "0001"
+    assert version == "0002"
+    assert "role" in columns

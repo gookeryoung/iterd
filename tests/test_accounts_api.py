@@ -50,6 +50,19 @@ def test_create_and_list_users(client: TestClient) -> None:
     assert {u["username"] for u in listed.json()} >= {"admin", "reviewer1"}
 
 
+def test_create_user_with_role(client: TestClient) -> None:
+    """管理员可创建三员角色用户；非法角色返回 400."""
+    resp = client.post("/api/v1/users", json={"username": "secadmin1", "password": "secret1", "role": "security_admin"})
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "security_admin"
+    listed = {u["username"]: u["role"] for u in client.get("/api/v1/users").json()}
+    assert listed["secadmin1"] == "security_admin"
+
+    bad = client.post("/api/v1/users", json={"username": "badrole", "password": "secret1", "role": "root"})
+    assert bad.status_code == 400
+    assert bad.json()["code"] == "ITERD-INVALID_ROLE"
+
+
 def test_api_token_flow(client: TestClient) -> None:
     created = client.post("/api/v1/api-tokens", json={"name": "ci"})
     assert created.status_code == 201
