@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     # 初始管理员（seed 时使用）
     admin_username: str = "admin"
-    admin_password: str = "admin123"
+    admin_password: str = "admin1234"
 
     host: str = "0.0.0.0"
     port: int = 8000

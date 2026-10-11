@@ -115,7 +115,7 @@ uv run python scripts/load_example.py --dataset examples/datasets/项目-边界�
 脚本幂等：项目/规则/规则集/仿真模板按编码或名称跳过已存在记录。
 `--with-check` / `--with-sim` 会启动进程内 worker 执行规则检查与仿真并等待终态。
 
-载入后启动服务查看：`uv run iterd serve`，默认管理员 `admin / admin123`，
+载入后启动服务查看：`uv run iterd serve`，默认管理员 `admin / admin1234`，
 演示用户 `designer / designer123`、`reviewer / reviewer123`。
 
 ### 2. 备份与还原演练

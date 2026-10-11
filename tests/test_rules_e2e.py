@@ -103,7 +103,9 @@ def test_full_check_flow(client: TestClient, scenario: dict[str, Any]) -> None:
     assert missing_task.status_code == 404
 
     # WebSocket 推送终态：连接后先发送 JWT 首帧鉴权（任务已完成时首条即终态）
-    token = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    token = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin1234"}).json()[
+        "access_token"
+    ]
     with client.websocket_connect(f"/api/v1/ws/tasks/{tasks[0]['id']}") as ws:
         ws.send_json({"token": token})
         message = ws.receive_json()

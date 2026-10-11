@@ -71,7 +71,7 @@ def test_rbac_project_isolation(client: TestClient, project: dict[str, Any]) -> 
 
     # 管理员将 designer 加入为 viewer
     client.headers.update({"Authorization": ""})
-    login_as(client, "admin", "admin123")
+    login_as(client, "admin", "admin1234")
     reviewer_id = next(u for u in client.get("/api/v1/users").json() if u["username"] == "designer")["id"]
     added = client.put(f"/api/v1/projects/{project['id']}/members", json={"user_id": reviewer_id, "role": "viewer"})
     assert added.status_code == 201

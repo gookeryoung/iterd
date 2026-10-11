@@ -37,7 +37,7 @@ def client(env: Path) -> Generator[TestClient, None, None]:
 
     application = create_app()
     with TestClient(application) as http:
-        resp = http.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        resp = http.post("/api/v1/auth/login", json={"username": "admin", "password": "admin1234"})
         http.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
         created = http.post("/api/v1/users", json={"username": "designer", "password": "designer123"})
         if created.status_code == 201:

@@ -42,7 +42,7 @@ def test_designer_project_visibility_and_member_ops(client: TestClient, project:
     assert client.get("/api/v1/projects").json() == []
     assert client.get(f"/api/v1/projects/{pid}").status_code == 403
 
-    login_as(client, "admin", "admin123")
+    login_as(client, "admin", "admin1234")
     designer_id = _user_id(client, "designer")
     client.post("/api/v1/users", json={"username": "mgr", "password": "mgr12345"})
     mgr_id = _user_id(client, "mgr")
@@ -240,7 +240,9 @@ def test_artifact_endpoint_edges(client: TestClient, project: dict[str, Any], it
 
 def test_task_list_filter_and_ws_missing(client: TestClient) -> None:
     assert client.get("/api/v1/tasks", params={"status": "succeeded", "limit": 5}).status_code == 200
-    token = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    token = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin1234"}).json()[
+        "access_token"
+    ]
     with client.websocket_connect("/api/v1/ws/tasks/99999") as ws:
         ws.send_json({"token": token})
         message = ws.receive_json()
@@ -294,6 +296,20 @@ def test_seed_ensure_admin(env: Path) -> None:
             await session.commit()
             await ensure_admin(session, "legacy", "newpass")
             await session.commit()
+            # 已存在管理员口令与配置不符时同步为配置口令；一致时不改动哈希
+            from iterd.core.security import hash_password, verify_password
+
+            session.add(User(username="stale", hashed_password=hash_password("oldpass"), is_active=True))
+            session.add(User(username="fresh", hashed_password=hash_password("samepass"), is_active=True))
+            await session.commit()
+            await ensure_admin(session, "stale", "newpass2")
+            await ensure_admin(session, "fresh", "samepass")
+            await session.commit()
+            stale = (await session.execute(select(User).where(User.username == "stale"))).scalar_one()
+            fresh = (await session.execute(select(User).where(User.username == "fresh"))).scalar_one()
+            assert verify_password("newpass2", stale.hashed_password)
+            assert not verify_password("oldpass", stale.hashed_password)
+            assert verify_password("samepass", fresh.hashed_password)
 
     asyncio.run(_run())
 

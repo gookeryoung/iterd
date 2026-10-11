@@ -12,7 +12,7 @@ services:
       ITERD_TASK_WORKER_IN_APP: "false"
       ITERD_SECRET_KEY: "change-me-in-production"
       ITERD_ADMIN_USERNAME: "admin"
-      ITERD_ADMIN_PASSWORD: "admin123"
+      ITERD_ADMIN_PASSWORD: "admin1234"
     volumes:
       - iterd-data:/app/data
     restart: unless-stopped

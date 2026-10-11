@@ -18,7 +18,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from iterd.core.security import hash_password
+from iterd.core.security import hash_password, verify_password
 from iterd.plugins.accounts.models import UserRole
 from iterd.plugins.accounts.services import create_user, get_by_username
 from iterd.plugins.artifacts import services as artifact_services
@@ -174,11 +174,20 @@ async def seed(session: AsyncSession, *, admin_username: str, admin_password: st
 
 
 async def ensure_admin(session: AsyncSession, username: str, password: str) -> None:
-    """确保初始管理员存在（serve 启动时调用）：系统管理员角色."""
+    """确保初始管理员存在（serve 启动时调用）：系统管理员角色.
+
+    管理员口令以配置为准：已存在但口令与配置不符时重置为配置口令并记录告警，
+    保证 ITERD_ADMIN_PASSWORD 变更（含默认口令调整）在存量库上同样生效。
+    """
     admin = await get_by_username(session, username)
     if admin is None:
         await create_user(
             session, username=username, password=password, is_superuser=True, role=UserRole.SYSTEM_ADMIN.value
         )
-    elif not admin.hashed_password.startswith("$2"):
+        return
+    if not admin.hashed_password.startswith("$2"):
         admin.hashed_password = hash_password(password)
+        return
+    if not verify_password(password, admin.hashed_password):
+        admin.hashed_password = hash_password(password)
+        logger.warning("[seed] 管理员 %s 已存在，口令与配置不符，已重置为配置口令", username)

@@ -8,7 +8,7 @@ from tests.conftest import login_as
 
 
 def test_login_success_and_me(client: TestClient) -> None:
-    resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin1234"})
     assert resp.status_code == 200
     token = resp.json()["access_token"]
 
