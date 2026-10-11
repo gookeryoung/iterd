@@ -61,6 +61,11 @@ def _which_none(_cmd: str) -> str | None:
     return None
 
 
+def _which_ok(cmd: str) -> str | None:
+    """shutil.which 替身：仅 pnpm 视为已安装，模拟 CI 无 pnpm 以外的正常环境."""
+    return "/usr/bin/pnpm" if cmd == "pnpm" else None
+
+
 def _run_stub(returncode: int, calls: list[Any] | None = None) -> Callable[..., subprocess.CompletedProcess[str]]:
     """subprocess.run 替身工厂：返回固定退出码，可选记录调用参数."""
 
@@ -110,6 +115,7 @@ def test_ensure_dev_env_missing_pnpm(fake_frontend: Path, monkeypatch: pytest.Mo
 
 def test_build_success(fake_frontend: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     """构建成功：调用 pnpm build 且产物 index.html 存在校验通过."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
     static = tmp_path / "static"
     static.mkdir()
@@ -126,6 +132,7 @@ def test_build_success(fake_frontend: Path, tmp_path: Path, monkeypatch: pytest.
 
 def test_build_command_failure(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """pnpm build 返回非零码时应以同码退出."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
     monkeypatch.setattr(cli.subprocess, "run", _run_stub(2))
     with pytest.raises(SystemExit, match="2"):
@@ -134,6 +141,7 @@ def test_build_command_failure(fake_frontend: Path, monkeypatch: pytest.MonkeyPa
 
 def test_build_missing_artifact(fake_frontend: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """构建后产物 index.html 缺失时应以 1 退出."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
     static = tmp_path / "static"
     static.mkdir()
@@ -145,6 +153,7 @@ def test_build_missing_artifact(fake_frontend: Path, tmp_path: Path, monkeypatch
 
 def test_dev_starts_both_servers(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     """dev 模式应同时启动 uvicorn --reload 后端与 pnpm dev 前端，并打印访问地址."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     _patch_popen(monkeypatch)
     _FakeProc.wait_results = [KeyboardInterrupt()]
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
@@ -166,6 +175,7 @@ def test_dev_starts_both_servers(fake_frontend: Path, monkeypatch: pytest.Monkey
 
 def test_dev_installs_deps_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """node_modules 缺失时应先执行 pnpm install 再启动服务."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     frontend = tmp_path / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text("{}", encoding="utf-8")
@@ -184,6 +194,7 @@ def test_dev_installs_deps_when_missing(tmp_path: Path, monkeypatch: pytest.Monk
 
 def test_dev_install_failure_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """依赖安装失败时应中止且不启动任何服务."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     frontend = tmp_path / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text("{}", encoding="utf-8")
@@ -197,6 +208,7 @@ def test_dev_install_failure_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 def test_dev_port_mismatch_warns(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     """后端端口与 Vite 代理目标（8000）不一致时应输出警告."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     _patch_popen(monkeypatch)
     _FakeProc.wait_results = [KeyboardInterrupt()]
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
@@ -210,6 +222,7 @@ def test_dev_port_mismatch_warns(fake_frontend: Path, monkeypatch: pytest.Monkey
 
 def test_dev_sigint_handler_cleans_up(fake_frontend: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """注册的 SIGINT 处理器应终止全部子进程并退出；后端正常退出时 dev 静默返回."""
+    monkeypatch.setattr("shutil.which", _which_ok)
     _patch_popen(monkeypatch)
     _FakeProc.wait_results = [0]
     monkeypatch.setattr(cli, "_frontend_dir", lambda: fake_frontend)
