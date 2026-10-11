@@ -5,7 +5,7 @@ PACKAGE := iterd
 COV_THRESHOLD := 95
 PYTEST_JOBS := 8  # pytest-xdist 并行进程数；Windows 默认 8 避免句柄耗尽
 
-.PHONY: help sync build b clean c test cov lint typecheck typecheck-ci check doc tox pub bump patch minor major push
+.PHONY: help sync frontend-sync frontend-typecheck frontend-build build b clean c test cov lint typecheck typecheck-ci check doc tox pub bump patch minor major push
 
 help: ## 显示帮助信息
 	@uv run python -c "import re,sys;ms=[(m.group(1),m.group(2).strip()) for f in sys.argv[1:] for l in open(f,encoding='utf-8') if (m:=re.match(r'^([a-zA-Z][\w -]*):.*?##\s*(.*)',l))];[print(f'  {n:<14} {d}') for n,d in ms]" $(MAKEFILE_LIST)
@@ -13,7 +13,19 @@ help: ## 显示帮助信息
 sync: ## 安装开发依赖
 	uv sync --extra dev
 
-build b: ## 构建分发包 (wheel + sdist)
+frontend-sync fs: ## 安装前端依赖（pnpm install，惰性：node_modules 已存在则跳过）
+	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8', errors='replace'); import os,subprocess;\
+print('[frontend] node_modules exist, skip pnpm install') if os.path.isdir('frontend/node_modules') else (\
+print('[frontend] node_modules not exist, start pnpm install...'),\
+subprocess.run(['pnpm','install','--frozen-lockfile'],cwd='frontend',check=True))"
+
+frontend-typecheck ft: frontend-sync ## 前端 TypeScript 类型检查
+	cd frontend && pnpm typecheck
+
+frontend-build fb: frontend-sync ## 构建前端（Vite，产物输出到 src/iterd/static/）
+	cd frontend && pnpm build
+
+build b: frontend-build ## 构建分发包 (前端 → wheel + sdist)
 	uv build
 
 clean c: ## 清理构建产物与缓存
