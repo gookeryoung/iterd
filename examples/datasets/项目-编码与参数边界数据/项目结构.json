@@ -1,0 +1,53 @@
+{
+  "_comment": "编码与参数边界数据 —— 检查器/求解器边界判定演示数据集。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py 一键载入演示。",
+  "project": {
+    "code": "BND-2026",
+    "name": "编码与参数边界数据",
+    "description": "产物编码规范与数值参数边界场景演示：覆盖编码正反例、元数据数值边界值与类型错误、扩展名大小写与白名单、停用规则（含未注册 checker_type）及仿真非法参数与压杆计算长度系数边界工况。",
+    "status": "active"
+  },
+  "sub_projects": [
+    {
+      "code": "BND-EDGE-2026",
+      "name": "边界工况计算子项",
+      "description": "边界工况独立计算专项（父项目成员自动继承权限）。",
+      "status": "active",
+      "parent_code": "BND-2026"
+    }
+  ],
+  "members": [
+    { "username": "designer", "project_code": "BND-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "BND-2026", "role": "reviewer" },
+    { "username": "designer", "project_code": "BND-EDGE-2026", "role": "designer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "BND-2026",
+      "title": "边界数据设计",
+      "objective": "产出编码与参数边界样本产物，执行规则检查与仿真边界工况验证",
+      "start_date": "2026-09-01",
+      "end_date": "2026-10-31",
+      "status": "active"
+    },
+    {
+      "number": 2,
+      "project_code": "BND-2026",
+      "title": "批量生产准备",
+      "objective": "planned 状态迭代样本：载入后保持 planned 不被状态机推进",
+      "start_date": "2026-11-01",
+      "end_date": "2026-12-15",
+      "status": "planned"
+    },
+    {
+      "number": 1,
+      "project_code": "BND-EDGE-2026",
+      "title": "边界工况验证",
+      "objective": "子项目独立迭代，验证边界工况计算与求解器输出一致性",
+      "start_date": "2026-09-10",
+      "end_date": "2026-10-20",
+      "status": "active"
+    }
+  ],
+  "baselines": []
+}

@@ -1,0 +1,48 @@
+{
+  "_comment": "仿真模板种子数据。覆盖 shaft_torsion 与 column_buckling 两类求解器的边界工况：正常对照组（全指标满足阈值 pass）、非法参数（扭矩 0 → 求解器参数校验失败 → 作业 status=failed）、压杆计算长度系数 μ=2.0（一端固定一端自由，临界力折减 4 倍 → 仅安全系数超阈 fail）。",
+  "shaft_geometry": {
+    "_comment": "传动轴 SHAFT-01：Φ45、校核轴段长 500mm、45钢调质，许用切应力 60MPa",
+    "diameter": 45,
+    "length": 500,
+    "shear_modulus": 79000,
+    "allowable_shear": 60
+  },
+  "column_geometry": {
+    "_comment": "加长立柱 COL-01：Q235B 方管 50x50x4 L=2000，E=206GPa",
+    "modulus": 206000
+  },
+  "thresholds": {
+    "_comment": "轴：许用切应力 50MPa、校核段扭转角限 1.0°、安全系数不低于 1.2；立柱：压应力限 100MPa、稳定安全系数不低于 2.0（临界压力仅记录不判定）",
+    "shaft": { "max_shear_stress": { "max": 50 }, "twist_angle": { "max": 1.0 }, "safety_factor": { "min": 1.2 } },
+    "column": { "actual_stress": { "max": 100 }, "safety_factor": { "min": 2.0 } }
+  },
+  "templates": [
+    {
+      "code": "BND-SHAFT-PASS-CHECK",
+      "name": "传动轴扭转校核（正常对照组 300N·m）",
+      "solver_type": "shaft_torsion",
+      "project_code": "BND-2026",
+      "description": "正常对照组：τ≈16.77MPa、扭转角≈0.27°、n≈3.58，三项均满足阈值，结论 pass",
+      "params": { "torque": 300, "diameter": 45, "length": 500, "shear_modulus": 79000, "allowable_shear": 60 },
+      "thresholds": { "max_shear_stress": { "max": 50 }, "twist_angle": { "max": 1.0 }, "safety_factor": { "min": 1.2 } }
+    },
+    {
+      "code": "BND-SHAFT-EDGE-CHECK",
+      "name": "传动轴扭转校核（零扭矩边界）",
+      "solver_type": "shaft_torsion",
+      "project_code": "BND-2026",
+      "description": "边界工况：扭矩为 0（非正数），求解器参数校验失败（求解参数 torque 必须为正数），作业 status=failed 且 summary 为 verdict=fail，无指标输出",
+      "params": { "torque": 0, "diameter": 45, "length": 500, "shear_modulus": 79000, "allowable_shear": 60 },
+      "thresholds": { "max_shear_stress": { "max": 50 }, "twist_angle": { "max": 1.0 }, "safety_factor": { "min": 1.2 } }
+    },
+    {
+      "code": "BND-COL-EDGE-CHECK",
+      "name": "立柱稳定性校核（μ=2.0 一端固定一端自由）",
+      "solver_type": "column_buckling",
+      "project_code": "BND-2026",
+      "description": "边界工况：50x50x2000 受 60kN，μ=2.0 时 Pcr≈66183N、压应力 24MPa 达标但 n≈1.10 低于 2.0，仅安全系数超阈，结论 fail（对照两端铰支 μ=1.0 时 n≈4.41 为 pass）",
+      "params": { "axial_load": 60000, "length": 2000, "width": 50, "height": 50, "modulus": 206000, "effective_length_factor": 2.0 },
+      "thresholds": { "actual_stress": { "max": 100 }, "safety_factor": { "min": 2.0 } }
+    }
+  ]
+}

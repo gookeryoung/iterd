@@ -9,7 +9,9 @@ examples/
 ├── backups/                       备份归档样本（iterd-backup-<版本>-v1-<UTC时间戳>.tar.gz）
 └── datasets/
     ├── 项目-某型输送机机架结构设计/   典型工程设计项目数据集
-    └── 项目-边界异常数据/            边界与异常场景数据集
+    ├── 项目-边界异常数据/            边界与异常场景数据集
+    ├── 项目-某型输送机传动轴与立柱设计/   检查器/求解器扩展功能数据集
+    └── 项目-编码与参数边界数据/       编码规范与数值参数边界数据集
 ```
 
 ## 数据集：某型带式输送机机架结构设计
@@ -94,6 +96,94 @@ examples/
   `TRL-NOMINAL-CHECK`（2000N）仅挠度单指标超阈 `fail`；`TRL-OVERLOAD-CHECK`（4500N）三项全部超阈 `fail`。
 - 完整基线见 `预期检查结果.json`。
 
+## 数据集：某型输送机传动轴与立柱设计（检查器/求解器扩展）
+
+场景：带宽 800mm 带式输送机传动系统设计，含 2 个项目（父子）、3 个迭代（父#1 closed 含基线）、
+8 个产物、6 条规则、1 个规则集、4 个仿真模板，
+覆盖新增的产物编码规范（artifact_code_convention）、重量数值范围（metadata_range）、
+扩展名白名单（file_extension_whitelist）三类检查器与压杆稳定性（column_buckling）、
+圆轴扭转（shaft_torsion）两个求解器的完整链路。
+
+### 元数据定义（可直接映射到 API 入参）
+
+| 文件 | 说明 |
+| --- | --- |
+| `项目结构.json` | 项目树、成员角色、迭代（含 closed 状态与基线） |
+| `规则库.json` | 规则条目：覆盖三类新检查器与两类元数据必填规则 |
+| `规则集.json` | 规则集成员与迭代绑定关系 |
+| `仿真模板.json` | 轴扭转与立柱稳定两类求解器、四种判定工况模板 |
+| `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
+| `产物元数据.csv` | 各产物版本的元数据（含重量超范围、缺校核者样本） |
+| `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
+| `预期检查结果.json` | 自检基线：检查汇总、发现项与四种仿真结论的期望值 |
+
+### 产物实体文件（上传用）
+
+| 文件 | 类别 | 说明 |
+| --- | --- | --- |
+| `DRW-300_revA.dxf` | drawing | 迭代 1 归档总图（基线快照对象，不参与迭代 2 检查） |
+| `SHF-301_revA.step` | model | 合规基准；SHAFT 系列仿真绑定对象 |
+| `COL-301_revA.step` | model | 合规基准；COL 系列仿真绑定对象 |
+| `CAL-301_revA.csv` | result | 传动轴扭转计算书（合规） |
+| `CAL-302_revA.csv` | result | **边界数据**：重量kg 误登记为 3200 超出上限，触发 RANGE-301 |
+| `SPC-301_revA.md` | spec | **边界数据**：缺校核者会签，触发 PROC-301 |
+| `exc-303_revA.dxf` | drawing | **边界数据**：小写编码且文件名小写开头，同时触发 CODE-301 与 NAME-301（演示规则独立性） |
+| `EXC-302_revA.zip` | result | **边界数据**：压缩包格式不在白名单，触发 EXT-301 |
+
+### 预期结果
+
+- 迭代 2 执行「传动系统设计规范」后 `CheckRun.summary` 应为
+  `{"error": 3, "warning": 1, "info": 1, "artifacts": 7, "rules": 6}`；
+  5 条发现项：文件名不规范 1 条（error）、编码不规范 1 条（error）、重量超上限 1 条（error）、
+  扩展名不在白名单 1 条（warning）、缺校核者 1 条（info）。
+- 仿真：`SHAFT-NOMINAL-CHECK`（800N·m）`pass`；`SHAFT-OVERLOAD-CHECK`（1500N·m）三项全部超阈 `fail`；
+  `COL-STABILITY-CHECK`（标准段）`pass`；`COL-SLENDER-CHECK`（细长杆）仅安全系数超阈 `fail`。
+- 完整基线见 `预期检查结果.json`。
+
+## 数据集：编码与参数边界数据
+
+场景：产物编码规范与数值参数边界验证，含 2 个项目（父子）、3 个迭代（父#1 active / 父#2 planned）、
+6 个产物、5 条规则（含 2 条停用，其中 1 条 checker_type 未注册）、1 个规则集、3 个仿真模板，
+专门覆盖编码正反例、数值边界值（恰好等于上下限判定通过）、数值类型错误、大写扩展名、
+停用规则跳过与计数、仿真非法参数（作业 failed）与压杆计算长度系数 μ=2.0 边界工况。
+13 个边界场景的完整清单见数据集内 `边界场景说明.csv`。
+
+### 元数据定义（可直接映射到 API 入参）
+
+| 文件 | 说明 |
+| --- | --- |
+| `项目结构.json` | 项目树、成员角色、迭代（含 planned 状态不被推进） |
+| `规则库.json` | 规则条目：含 `enabled=false` 停用规则与未注册 checker_type 停用规则（依赖前提见条目描述） |
+| `规则集.json` | 规则集成员（含停用规则）与迭代绑定关系 |
+| `仿真模板.json` | 正常对照（pass）/ 零扭矩非法参数（作业 failed）/ μ=2.0 压杆（单指标 fail）三类模板 |
+| `产物清单.csv` | 产物编码/名称/类别/所属迭代/上传文件名 |
+| `产物元数据.csv` | 各产物版本的元数据（含恰好等于上下限的边界值与非数值文本样本） |
+| `边界场景说明.csv` | 边界场景清单：编号、类别、数据特征、预期表现 |
+| `零件清单.csv` | BOM：零件编码、材料、规格、数量、重量 |
+| `预期检查结果.json` | 自检基线：检查汇总、发现项与三类仿真结论（含 failed 作业）的期望值 |
+
+### 产物实体文件（上传用）
+
+| 文件 | 类别 | 说明 |
+| --- | --- | --- |
+| `RND-401_revA.step` | model | 合规基准数据（重量kg=500 恰好等于上限判定通过；元数据含数值与布尔字段）；SHAFT 系列仿真绑定对象 |
+| `rnd-402_revA.step` | model | **边界数据**：小写产物编码，触发 BND-CODE-401；COL 系列仿真绑定对象 |
+| `RND403_revA.dwg` | drawing | **边界数据**：缺连字符产物编码，触发 BND-CODE-401 |
+| `CAL-401_revA.csv` | result | **边界数据**：重量kg 误填中文文本「约4.2」，触发 BND-RANGE-401 类型错误 |
+| `RND-404_revA.STEP` | model | **边界数据**：大写扩展名（大小写不敏感判定通过）；重量kg=0.1 恰好等于下限判定通过 |
+| `RND-405_revA.rar` | result | **边界数据**：压缩包格式不在白名单，触发 BND-EXT-401 |
+
+### 预期结果
+
+- 迭代 1 执行「编码与参数边界检查集」后 `CheckRun.summary` 应为
+  `{"error": 3, "warning": 1, "info": 0, "artifacts": 6, "rules": 3}`；
+  4 条发现项：编码不规范 2 条（error）、重量非数值 1 条（error）、扩展名不在白名单 1 条（warning）；
+  停用规则 BND-NAME-404 / BND-CHK-405 不产生发现项且不计入 rules。
+- 仿真：`BND-SHAFT-PASS-CHECK`（300N·m）`pass`；
+  `BND-SHAFT-EDGE-CHECK`（零扭矩）求解器参数校验失败，作业 `status=failed` 且无指标输出；
+  `BND-COL-EDGE-CHECK`（μ=2.0 一端固定一端自由，临界力折减 4 倍）仅安全系数超阈 `fail`。
+- 完整基线见 `预期检查结果.json`。
+
 ## 使用方式
 
 ### 1. 载入示例数据
@@ -110,6 +200,12 @@ uv run python scripts/load_example.py --dataset examples/datasets/项目-某型�
 
 # 载入边界异常数据集（完整链路：检查 + 仿真）
 uv run python scripts/load_example.py --dataset examples/datasets/项目-边界异常数据 --with-check --with-sim
+
+# 载入传动轴与立柱设计数据集（新检查器/求解器完整链路）
+uv run python scripts/load_example.py --dataset examples/datasets/项目-某型输送机传动轴与立柱设计 --with-check --with-sim
+
+# 载入编码与参数边界数据集（含停用规则与非法参数仿真边界）
+uv run python scripts/load_example.py --dataset examples/datasets/项目-编码与参数边界数据 --with-check --with-sim
 ```
 
 脚本幂等：项目/规则/规则集/仿真模板按编码或名称跳过已存在记录。

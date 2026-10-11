@@ -1,0 +1,65 @@
+{
+  "_comment": "示例数据自检基线：载入本数据集后对「BND-2026 迭代 1」执行「编码与参数边界检查集」检查，CheckRun.summary 应与 expected_summary 一致（停用规则 BND-NAME-404 / BND-CHK-405 不产生发现项且不计入 rules）；仿真作业按 expected_simulations 发起（模板 + 绑定产物），verdict 与 failed_keys 用于核对结果页展示；BND-SHAFT-EDGE-CHECK 为非法参数边界，作业 status=failed 且无指标输出。",
+  "iteration": { "project_code": "BND-2026", "number": 1 },
+  "rule_set": "编码与参数边界检查集",
+  "expected_summary": {
+    "error": 3,
+    "warning": 1,
+    "info": 0,
+    "artifacts": 6,
+    "rules": 3
+  },
+  "expected_findings": [
+    {
+      "rule_code": "BND-CODE-401",
+      "severity": "error",
+      "artifact_code": "rnd-402",
+      "location": "rnd-402",
+      "message_contains": "产物编码 rnd-402 不符合规范"
+    },
+    {
+      "rule_code": "BND-CODE-401",
+      "severity": "error",
+      "artifact_code": "RND403",
+      "location": "RND403",
+      "message_contains": "产物编码 RND403 不符合规范"
+    },
+    {
+      "rule_code": "BND-RANGE-401",
+      "severity": "error",
+      "artifact_code": "CAL-401",
+      "location": "metadata",
+      "message_contains": "元数据 重量kg 应为数值"
+    },
+    {
+      "rule_code": "BND-EXT-401",
+      "severity": "warning",
+      "artifact_code": "RND-405",
+      "location": "RND-405_revA.rar",
+      "message_contains": "文件扩展名 .rar 不在允许清单"
+    }
+  ],
+  "expected_simulations": [
+    {
+      "template_code": "BND-SHAFT-PASS-CHECK",
+      "bind_artifact_code": "RND-401",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "max_shear_stress": 16.7669, "twist_angle": "≈0.270232", "safety_factor": "≈3.5785" }
+    },
+    {
+      "template_code": "BND-SHAFT-EDGE-CHECK",
+      "bind_artifact_code": "RND-401",
+      "status": "failed",
+      "verdict": "fail",
+      "error_contains": "求解参数 torque 必须为正数"
+    },
+    {
+      "template_code": "BND-COL-EDGE-CHECK",
+      "bind_artifact_code": "rnd-402",
+      "verdict": "fail",
+      "failed_keys": ["safety_factor"],
+      "metrics_hint": { "critical_load": 66182.8941, "actual_stress": 24.0, "safety_factor": "≈1.1030" }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('加长立柱三维模型（小写编码边界数据）'),'2;1');
+FILE_NAME('rnd-402_revA.step','2026-09-25T10:15:00',('张伟'),('某机械设计院'),'iterd','iterd 0.1.0','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 -1 1 5 4 }'));
+ENDSEC;
+DATA;
+/* 坐标系 */
+#1 = CARTESIAN_POINT('原点',(0.0,0.0,0.0));
+#2 = DIRECTION('X轴',(1.0,0.0,0.0));
+#3 = DIRECTION('Y轴',(0.0,1.0,0.0));
+#4 = DIRECTION('Z轴',(0.0,0.0,1.0));
+#5 = AXIS2_PLACEMENT_3D('世界坐标系',#1,#4,#2);
+/* 加长立柱 COL-01：Q235B 方管 50x50x4 L=2000，底部一端固定（μ=2.0 工况验证对象） */
+#10 = CARTESIAN_POINT('立柱底部',(0.0,0.0,0.0));
+#11 = DIRECTION('立柱轴向',(0.0,0.0,1.0));
+#12 = ADVANCED_BREP_SHAPE_REPRESENTATION('加长立柱',(#10,#11),#5);
+#13 = SHAPE_DEFINITION_REPRESENTATION('COL-01','立柱 方管50x50x4 L=2000',#12);
+#14 = PRODUCT('COL-01','加长立柱','Q235B',(#13));
+/* 底板：200x200x10，化学锚栓固定 */
+#20 = CARTESIAN_POINT('底板中心',(0.0,0.0,-10.0));
+#21 = ADVANCED_BREP_SHAPE_REPRESENTATION('底板',(#20,#11),#5);
+#22 = SHAPE_DEFINITION_REPRESENTATION('COL-02','立柱底板 200x200x10',#21);
+#23 = PRODUCT('COL-02','立柱底板','Q235B',(#22));
+ENDSEC;
+END-ISO-10303-21;

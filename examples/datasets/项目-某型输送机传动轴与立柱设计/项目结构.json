@@ -1,0 +1,55 @@
+{
+  "_comment": "某型输送机传动轴与立柱设计 —— 检查器/求解器扩展功能演示数据集。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py 一键载入演示。",
+  "project": {
+    "code": "AXLE-2026",
+    "name": "某型输送机传动轴与立柱设计",
+    "description": "带宽 800mm 带式输送机传动系统设计：传动轴扭转校核与中间立柱稳定性校核，覆盖产物编码规范、重量数值范围、扩展名白名单三类检查器及两个求解器的完整链路。",
+    "status": "active"
+  },
+  "sub_projects": [
+    {
+      "code": "AXLE-CALC-2026",
+      "name": "传动系统计算子项",
+      "description": "轴系与立柱的力学计算专项（父项目成员自动继承权限）。",
+      "status": "active",
+      "parent_code": "AXLE-2026"
+    }
+  ],
+  "members": [
+    { "username": "designer", "project_code": "AXLE-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "AXLE-2026", "role": "reviewer" },
+    { "username": "designer", "project_code": "AXLE-CALC-2026", "role": "designer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "AXLE-2026",
+      "title": "传动方案设计",
+      "objective": "确定传动链布置与轴系主要参数，输出总图并归档基线",
+      "start_date": "2026-07-01",
+      "end_date": "2026-08-15",
+      "status": "closed"
+    },
+    {
+      "number": 2,
+      "project_code": "AXLE-2026",
+      "title": "详细设计与校核",
+      "objective": "完成轴系与立柱模型、计算书，执行规则检查与扭转/稳定性仿真验证",
+      "start_date": "2026-09-01",
+      "end_date": "2026-10-31",
+      "status": "active"
+    },
+    {
+      "number": 1,
+      "project_code": "AXLE-CALC-2026",
+      "title": "校核方法验证",
+      "objective": "子项目独立迭代，验证计算书与求解器输出一致性",
+      "start_date": "2026-09-10",
+      "end_date": "2026-10-20",
+      "status": "active"
+    }
+  ],
+  "baselines": [
+    { "project_code": "AXLE-2026", "iteration_number": 1, "name": "BL-传动方案基线" }
+  ]
+}

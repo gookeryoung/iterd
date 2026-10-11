@@ -1,0 +1,55 @@
+{
+  "_comment": "编码与参数边界规则库种子数据。BND-CODE-401 / BND-RANGE-401 / BND-EXT-401 覆盖三类检查器的边界判定（编码正反例、边界值含端点、扩展名大小写不敏感）；BND-NAME-404 与 BND-CHK-405 为停用规则（enabled=false），验证停用规则不产生发现项且不计入 summary.rules。BND-CHK-405 的 checker_type 未注册，依赖前提：create_rule 不校验 checker_type 且检查执行时按 enabled 过滤（若后续版本增加创建校验，该样本载入将 422）。",
+  "rules": [
+    {
+      "code": "BND-CODE-401",
+      "name": "产物编码规范",
+      "category": "drafting",
+      "checker_type": "artifact_code_convention",
+      "params": { "pattern": "^[A-Z]{3}-\\d{3,}$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "产物编码须为三字母前缀-三位以上数字（如 RND-401），小写或缺连字符即判错"
+    },
+    {
+      "code": "BND-RANGE-401",
+      "name": "重量数值范围校验",
+      "category": "material",
+      "checker_type": "metadata_range",
+      "params": { "ranges": { "重量kg": { "min": 0.1, "max": 500 } } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "登记重量须为 0.1~500kg 的数值（恰好等于上下限判定通过），非数值或越界即判错；缺失该键不报（必填职责归 metadata_required 类规则）"
+    },
+    {
+      "code": "BND-EXT-401",
+      "name": "产物格式白名单",
+      "category": "drafting",
+      "checker_type": "file_extension_whitelist",
+      "params": { "extensions": [".dxf", ".dwg", ".step", ".stp", ".csv", ".md"] },
+      "severity_default": "warning",
+      "enabled": true,
+      "description": "产物文件须为工程常用格式（扩展名大小写不敏感），压缩包等须转换为受支持格式归档"
+    },
+    {
+      "code": "BND-NAME-404",
+      "name": "历史文件名规范（已停用）",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z0-9-]+_rev[A-Z]\\.\\w+$" },
+      "severity_default": "warning",
+      "enabled": false,
+      "description": "已停用：规则集内含停用规则时，检查应跳过且不计入 rules 计数"
+    },
+    {
+      "code": "BND-CHK-405",
+      "name": "未注册检查器规则（已停用）",
+      "category": "process",
+      "checker_type": "no_such_checker",
+      "params": {},
+      "severity_default": "warning",
+      "enabled": false,
+      "description": "已停用且 checker_type 未注册：依赖 create_rule 不校验 checker_type 与检查执行时按 enabled 过滤，载入与检查均安全（若后续在创建时校验 checker_type，该样本将 422）"
+    }
+  ]
+}

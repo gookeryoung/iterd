@@ -1,0 +1,65 @@
+{
+  "_comment": "传动系统设计规范规则库种子数据。checker_type 取值须为 GET /api/v1/rules/checkers 已注册检查器；本数据集重点覆盖新增的 artifact_code_convention / metadata_range / file_extension_whitelist 三类检查器，params 结构由检查器定义。",
+  "rules": [
+    {
+      "code": "NAME-301",
+      "name": "图纸文件名规范",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z0-9-]+_rev[A-Z]\\.\\w+$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "产物文件名须形如 CODE_revX.ext，编码段仅允许大写字母/数字/连字符"
+    },
+    {
+      "code": "CODE-301",
+      "name": "产物编码规范",
+      "category": "drafting",
+      "checker_type": "artifact_code_convention",
+      "params": { "pattern": "^[A-Z]{3}-\\d{3,}$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "产物编码须为三字母前缀-三位以上数字，如 SHF-301"
+    },
+    {
+      "code": "RANGE-301",
+      "name": "重量登记范围校验",
+      "category": "material",
+      "checker_type": "metadata_range",
+      "params": { "ranges": { "重量kg": { "min": 0.1, "max": 500 } } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "单件产物登记重量须在 0.1~500kg，超出视为登记错误（缺重量键不报，必填归 MATL 类规则）"
+    },
+    {
+      "code": "EXT-301",
+      "name": "产物格式白名单",
+      "category": "drafting",
+      "checker_type": "file_extension_whitelist",
+      "params": { "extensions": [".dxf", ".dwg", ".step", ".stp", ".csv", ".md"] },
+      "severity_default": "warning",
+      "enabled": true,
+      "description": "产物文件须为工程常用格式，压缩包等须转换为受支持格式归档"
+    },
+    {
+      "code": "MATL-301",
+      "name": "材料元数据必填",
+      "category": "material",
+      "checker_type": "metadata_required",
+      "params": { "required": { "材料": "str", "尺寸": "str" } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "上传版本时须登记材料与关键尺寸"
+    },
+    {
+      "code": "PROC-301",
+      "name": "设计校核会签",
+      "category": "process",
+      "checker_type": "metadata_required",
+      "params": { "required": { "设计者": "str", "校核者": "str" } },
+      "severity_default": "info",
+      "enabled": true,
+      "description": "归档前应完成设计者与校核者双签"
+    }
+  ]
+}
