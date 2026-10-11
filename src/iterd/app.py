@@ -10,22 +10,22 @@ from pathlib import Path
 
 from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi_offline import FastAPIOffline
 from starlette.exceptions import HTTPException
 from starlette.types import Scope
 
 from iterd.core.config import get_settings
 from iterd.core.database import get_engine, get_session_factory
 from iterd.core.errors import register_error_handlers
-from iterd.models import Base
 
 logger = logging.getLogger("iterd.app")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """启动：建表（SQLite create_all，alembic 迁移见设计文件说明）→ 确保管理员 → 进程内 worker."""
+    """启动：alembic 迁移至最新 → 确保管理员 → 进程内 worker."""
     settings = get_settings()
-    # 导入全部模型确保 metadata 完整
+    # 导入全部模型确保 metadata 完整（迁移 env.py 自行导入，此处供种子与 worker 使用）
     from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace  # noqa: F401
     from iterd.plugins.rules import services as rule_services
     from iterd.plugins.simulation import services as sim_services
@@ -34,9 +34,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     rule_services.register_executors()
     sim_services.register_executors()
 
+    # lifespan 自动迁移（cndb 模式）：同步执行，含存量 create_all 库 stamp 兼容
+    from iterd.core.migrations import upgrade_head
+
+    await asyncio.to_thread(upgrade_head)
     engine = get_engine(settings.database_url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     factory = get_session_factory(engine)
     async with factory() as session:
         from iterd.seed import ensure_admin
@@ -70,7 +72,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """创建应用实例：挂载插件路由、静态 SPA 与 WebSocket."""
     settings = get_settings()
-    app = FastAPI(title="iterd", description="产品迭代式开发系统.", lifespan=lifespan, debug=settings.debug)
+    app = FastAPIOffline(title="iterd", description="产品迭代式开发系统.", lifespan=lifespan, debug=settings.debug)
 
     register_error_handlers(app)
 

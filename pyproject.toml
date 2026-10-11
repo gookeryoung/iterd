@@ -9,6 +9,8 @@ classifiers = [
 # 依赖上界沿用 cndb 的 Win7 兼容约束（pydantic<2.7、fastapi<0.126、pydantic-settings<2.3、bcrypt<4、cryptography 42.x）
 dependencies = [
     "fastapi>=0.100.0,<0.126",
+    "fastapi-offline>=1.2.4",
+    "alembic>=1.13,<2",
     "pydantic>=2.0,<2.7",
     "pydantic-settings>=2.0,<2.3",
     "uvicorn[standard]>=0.20.0",

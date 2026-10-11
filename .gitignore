@@ -26,8 +26,9 @@ coverage.xml
 .idea/
 *_profile.html
 
-# 本地协作产物（需求/迭代/规则记录，不入版本库）
+# 本地协作产物（需求/迭代/规则/记忆记录，不入版本库）
 /.trae/
+/.workbuddy/
 
 # 示例数据载入脚本生成的运行态数据目录
 .iterd-example/

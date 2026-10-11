@@ -217,29 +217,10 @@ def cmd_worker(worker_id: str | None) -> None:
 
 
 def _prepare_db() -> None:
-    """建表（seed/worker 前置）。"""
-    from iterd.core.config import get_settings
-    from iterd.core.database import get_engine
-    from iterd.models import Base
+    """数据库就绪（seed/worker 前置）：alembic 迁移至最新（存量 create_all 库自动 stamp）。"""
+    from iterd.core.migrations import upgrade_head
 
-    # 触发全部模型注册
-    from iterd.plugins import (  # noqa: F401
-        accounts,
-        artifacts,
-        notify,
-        projects,
-        rules,
-        simulation,
-        trace,
-    )
-    from iterd.tasks import models as _task_models  # noqa: F401
-
-    async def _create() -> None:
-        engine = get_engine(get_settings().database_url)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    asyncio.run(_create())
+    upgrade_head()
 
 
 def cmd_seed() -> None:

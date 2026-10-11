@@ -31,7 +31,11 @@ class Artifact(Base, TimestampMixin, UidMixin):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     category: Mapped[str] = mapped_column(String(16), nullable=False)
     description: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
-    current_version_id: Mapped[int | None] = mapped_column(ForeignKey("artifact_versions.id"), nullable=True)
+    # use_alter：与 ArtifactVersion.artifact_id 构成循环外键，建表后单独添加约束（PG 必需）
+    current_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("artifact_versions.id", use_alter=True, name="fk_artifacts_current_version_id_artifact_versions"),
+        nullable=True,
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)  # 软删
 
 
