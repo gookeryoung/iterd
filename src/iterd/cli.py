@@ -73,7 +73,15 @@ def _prepare_db() -> None:
     from iterd.models import Base
 
     # 触发全部模型注册
-    from iterd.plugins import accounts, artifacts, notify, projects, rules, trace  # noqa: F401
+    from iterd.plugins import (  # noqa: F401
+        accounts,
+        artifacts,
+        notify,
+        projects,
+        rules,
+        simulation,
+        trace,
+    )
     from iterd.tasks import models as _task_models  # noqa: F401
 
     async def _create() -> None:

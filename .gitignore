@@ -29,6 +29,10 @@ coverage.xml
 # 本地协作产物（需求/迭代/规则记录，不入版本库）
 /.trae/
 
+# 示例数据载入脚本生成的运行态数据目录
+.iterd-example/
+.iterd-example-verify/
+
 # 环境变量与凭证（勿提交）
 .env
 .env.*

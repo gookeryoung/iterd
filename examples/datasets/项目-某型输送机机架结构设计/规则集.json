@@ -1,0 +1,21 @@
+{
+  "_comment": "规则集与迭代绑定种子数据。project_code 为 null 表示全局规则集；rule_codes 引用 规则库.json 中的 code。",
+  "rule_sets": [
+    {
+      "name": "机械设计通用规范",
+      "project_code": null,
+      "description": "全局规则集：图纸命名、材料、公差与工艺会签四类检查",
+      "rule_codes": ["DRAFT-001", "MATL-001", "TOL-001", "PROC-001"]
+    },
+    {
+      "name": "机架专项检查",
+      "project_code": "CVY-2026",
+      "description": "项目级规则集：仅覆盖制图与材料两类强制项",
+      "rule_codes": ["DRAFT-001", "MATL-001"]
+    }
+  ],
+  "bindings": [
+    { "project_code": "CVY-2026", "iteration_number": 2, "rule_set_name": "机械设计通用规范" },
+    { "project_code": "CVY-2026-FRAME", "iteration_number": 1, "rule_set_name": "机架专项检查" }
+  ]
+}

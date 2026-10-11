@@ -1,0 +1,55 @@
+{
+  "_comment": "某型带式输送机机架结构设计 —— 典型项目结构种子数据。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py 一键载入演示。",
+  "project": {
+    "code": "CVY-2026",
+    "name": "某型带式输送机机架结构设计",
+    "description": "带宽 800mm、机长 24m 的带式输送机机架结构设计，含概念设计、详细设计与强度校核三轮迭代。",
+    "status": "active"
+  },
+  "sub_projects": [
+    {
+      "code": "CVY-2026-FRAME",
+      "name": "机架结构子项",
+      "description": "支腿、横梁、纵梁等承力结构设计（父项目成员自动继承权限）。",
+      "status": "active",
+      "parent_code": "CVY-2026"
+    }
+  ],
+  "members": [
+    { "username": "designer", "project_code": "CVY-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "CVY-2026", "role": "reviewer" },
+    { "username": "designer", "project_code": "CVY-2026-FRAME", "role": "designer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "CVY-2026",
+      "title": "概念设计",
+      "objective": "确定机架总体布置方案，输出总装草图与主要截面尺寸",
+      "start_date": "2026-07-01",
+      "end_date": "2026-08-15",
+      "status": "closed"
+    },
+    {
+      "number": 2,
+      "project_code": "CVY-2026",
+      "title": "详细设计与强度校核",
+      "objective": "完成零件图与三维模型，执行规则检查与静力仿真验证",
+      "start_date": "2026-09-01",
+      "end_date": "2026-10-31",
+      "status": "active"
+    },
+    {
+      "number": 1,
+      "project_code": "CVY-2026-FRAME",
+      "title": "支腿与横梁详细设计",
+      "objective": "子项目独立迭代，验证父项目角色继承",
+      "start_date": "2026-09-10",
+      "end_date": "2026-10-20",
+      "status": "active"
+    }
+  ],
+  "baselines": [
+    { "project_code": "CVY-2026", "iteration_number": 1, "name": "BL-概念设计基线" }
+  ]
+}

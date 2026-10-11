@@ -1,0 +1,8 @@
+﻿产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
+DRW-000,概念方案总图,drawing,CVY-2026,1,DRW-000_revA.dxf,迭代1归档产物（基线快照对象）
+DRW-001,机架总装图,drawing,CVY-2026,2,DRW-001_revA.dxf,合规命名与齐全元数据
+DRW-002,横梁零件图,drawing,CVY-2026,2,DRW-002_revA.dxf,合规命名与齐全元数据
+MOD-001,机架三维模型,model,CVY-2026,2,MOD-001_revA.step,STEP AP203 中性格式
+SPC-001,机架技术要求,spec,CVY-2026,2,SPC-001_revA.md,焊接与涂装技术要求
+CAL-001,横梁强度计算书,result,CVY-2026,2,CAL-001_revA.csv,缺校核者会签（触发 info）
+DRW-003,机架草图,drawing,CVY-2026,2,机架草图-最终版.dwg,典型问题数据：文件名不规范且元数据缺项

@@ -1,0 +1,59 @@
+{
+  "_comment": "仿真模板种子数据。solver_type 取自 GET /api/v1/solvers；thresholds 形如 {指标: {min|max}}，未设阈值的指标只记录不判定。两个模板共用几何与阈值，仅载荷不同，用于演示 pass / fail 两种结论。",
+  "geometry": {
+    "_comment": "横梁 FRM-02：矩形截面 40x80（宽x高），跨距 2000mm，Q235B",
+    "length": 2000,
+    "width": 40,
+    "height": 80,
+    "modulus": 206000,
+    "yield_strength": 235
+  },
+  "thresholds": {
+    "_comment": "许用应力 160MPa；挠度按 L/400=5mm 控制；安全系数不低于 1.5",
+    "max_stress": { "max": 160 },
+    "deflection": { "max": 5 },
+    "safety_factor": { "min": 1.5 }
+  },
+  "templates": [
+    {
+      "code": "BEAM-STATIC-CHECK",
+      "name": "横梁静强度校核（额定）",
+      "solver_type": "beam_static",
+      "project_code": "CVY-2026",
+      "description": "额定载荷 8000N：max_stress=93.75MPa、deflection≈3.79mm、n≈2.51，三项均满足阈值，结论 pass",
+      "params": {
+        "load": 8000,
+        "length": 2000,
+        "width": 40,
+        "height": 80,
+        "modulus": 206000,
+        "yield_strength": 235
+      },
+      "thresholds": {
+        "max_stress": { "max": 160 },
+        "deflection": { "max": 5 },
+        "safety_factor": { "min": 1.5 }
+      }
+    },
+    {
+      "code": "BEAM-HEAVY-CHECK",
+      "name": "横梁超载工况校核",
+      "solver_type": "beam_static",
+      "project_code": "CVY-2026",
+      "description": "1.875 倍额定载荷 15000N：max_stress=175.78MPa 超许用、deflection≈7.11mm 超 L/400、n≈1.34 低于要求，三项均超阈，结论 fail",
+      "params": {
+        "load": 15000,
+        "length": 2000,
+        "width": 40,
+        "height": 80,
+        "modulus": 206000,
+        "yield_strength": 235
+      },
+      "thresholds": {
+        "max_stress": { "max": 160 },
+        "deflection": { "max": 5 },
+        "safety_factor": { "min": 1.5 }
+      }
+    }
+  ]
+}

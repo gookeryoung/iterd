@@ -1,0 +1,45 @@
+{
+  "_comment": "机械设计通用规范规则库种子数据。checker_type 取值须为 GET /api/v1/checkers 已注册检查器；params 结构由检查器定义。",
+  "rules": [
+    {
+      "code": "DRAFT-001",
+      "name": "图纸文件名规范",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z0-9-]+_rev[A-Z]\\.\\w+$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "产物文件名须形如 CODE_revX.ext，便于版本与编码体系对齐"
+    },
+    {
+      "code": "MATL-001",
+      "name": "材料元数据必填",
+      "category": "material",
+      "checker_type": "metadata_required",
+      "params": { "required": { "材料": "str", "尺寸": "str", "公差": "str" } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "上传版本时须登记材料牌号、关键尺寸与公差"
+    },
+    {
+      "code": "TOL-001",
+      "name": "公差与粗糙度登记",
+      "category": "tolerance",
+      "checker_type": "metadata_required",
+      "params": { "required": { "公差": "str", "粗糙度": "str" } },
+      "severity_default": "warning",
+      "enabled": true,
+      "description": "关键配合面须标注公差等级与表面粗糙度"
+    },
+    {
+      "code": "PROC-001",
+      "name": "设计校核会签",
+      "category": "process",
+      "checker_type": "metadata_required",
+      "params": { "required": { "设计者": "str", "校核者": "str" } },
+      "severity_default": "info",
+      "enabled": true,
+      "description": "归档前应完成设计者与校核者双签"
+    }
+  ]
+}

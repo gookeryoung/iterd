@@ -1,0 +1,65 @@
+{
+  "_comment": "示例数据自检基线：载入本数据集后对「迭代 2」执行「机械设计通用规范」规则集检查，CheckRun.summary 应与 expected_summary 一致；仿真作业按 expected_simulations 发起（模板 + 绑定产物），verdict 与 failed_keys 用于核对结果页展示。挠度为长小数，基线仅给判定结论与两位近似值。",
+  "iteration": { "project_code": "CVY-2026", "number": 2 },
+  "rule_set": "机械设计通用规范",
+  "expected_summary": {
+    "error": 2,
+    "warning": 1,
+    "info": 2,
+    "artifacts": 6,
+    "rules": 4
+  },
+  "expected_findings": [
+    {
+      "rule_code": "DRAFT-001",
+      "severity": "error",
+      "artifact_code": "DRW-003",
+      "location": "机架草图-最终版.dwg",
+      "message_contains": "不符合规范"
+    },
+    {
+      "rule_code": "MATL-001",
+      "severity": "error",
+      "artifact_code": "DRW-003",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据: 公差"
+    },
+    {
+      "rule_code": "TOL-001",
+      "severity": "warning",
+      "artifact_code": "DRW-003",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据"
+    },
+    {
+      "rule_code": "PROC-001",
+      "severity": "info",
+      "artifact_code": "DRW-003",
+      "location": "metadata",
+      "message_contains": "校核者"
+    },
+    {
+      "rule_code": "PROC-001",
+      "severity": "info",
+      "artifact_code": "CAL-001",
+      "location": "metadata",
+      "message_contains": "校核者"
+    }
+  ],
+  "expected_simulations": [
+    {
+      "template_code": "BEAM-STATIC-CHECK",
+      "bind_artifact_code": "DRW-002",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "max_stress": 93.75, "deflection": "≈3.79", "safety_factor": "≈2.51" }
+    },
+    {
+      "template_code": "BEAM-HEAVY-CHECK",
+      "bind_artifact_code": "DRW-002",
+      "verdict": "fail",
+      "failed_keys": ["max_stress", "deflection", "safety_factor"],
+      "metrics_hint": { "max_stress": 175.7812, "deflection": "≈7.11", "safety_factor": "≈1.34" }
+    }
+  ]
+}
