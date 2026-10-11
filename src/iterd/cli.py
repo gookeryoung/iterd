@@ -295,6 +295,16 @@ def cmd_seed() -> None:
     for item in summary["users"]:
         mark = "新建" if item["created"] else "已有"
         print(f"  {item['role']}: {item['username']} / {item['password']}  ({mark})")
+    flow = summary.get("demo_flow") or {}
+    if flow:
+        print(
+            "[seed] 演示流程："
+            f"规则集{'新建' if flow.get('rule_set') else '沿用'} / "
+            f"绑定{'新建' if flow.get('binding') else '沿用'} / "
+            f"迭代{'已激活' if flow.get('activated') else '沿用状态'} / "
+            f"基线{'新建' if flow.get('baseline') else '沿用'} / "
+            f"检查运行{'#' + str(flow['check_run_id']) if flow.get('check_run_id') else '沿用'}"
+        )
 
 
 def cmd_info() -> None:

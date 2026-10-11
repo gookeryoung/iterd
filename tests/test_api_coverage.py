@@ -277,6 +277,7 @@ def test_seed_ensure_admin(env: Path) -> None:
                 "sec_admin": "安全管理员",
                 "audit_admin": "审计管理员",
                 "designer": "普通用户",
+                "reviewer": "普通用户",
                 "demo": "普通用户",
             }
             # 幂等：重复 seed 跳过（账号清单不变，全部标记"沿用既有"）

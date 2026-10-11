@@ -156,14 +156,16 @@ async def get_iteration(iteration_id: int, user: CurrentUser, session: SessionDe
 
 @router.patch("/iterations/{iteration_id}", response_model=schemas.IterationOut)
 async def update_iteration(
-    iteration_id: int, body: schemas.IterationIn, user: CurrentUser, session: SessionDep
+    iteration_id: int, body: schemas.IterationPatch, user: CurrentUser, session: SessionDep
 ) -> schemas.IterationOut:
-    """更新迭代（designer+；状态迁移走状态机）。"""
+    """更新迭代（designer+；支持仅传 status 的部分更新，状态迁移走状态机）。"""
     iteration = await services.get_iteration(session, iteration_id)
     await rbac.require_project_role(session, iteration.project_id, user.id, "designer", is_superuser=user.is_superuser)
     fields = body.model_dump(exclude_unset=True)
-    if fields.get("number") is None:
-        fields.pop("number", None)
+    # 非空约束字段显式传 null 视为未变更；时间窗字段允许传 null 清空
+    for key in ("number", "title", "objective", "status"):
+        if fields.get(key) is None:
+            fields.pop(key, None)
     updated = await services.update_iteration(session, actor_id=user.id, iteration=iteration, fields=fields)
     await session.commit()
     return schemas.IterationOut.model_validate(updated)

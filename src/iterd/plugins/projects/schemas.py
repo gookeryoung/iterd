@@ -65,7 +65,7 @@ class MyRoleOut(BaseModel):
 
 
 class IterationIn(BaseModel):
-    """创建/更新迭代入参."""
+    """创建迭代入参."""
 
     number: int | None = None
     title: str = Field(min_length=1, max_length=128)
@@ -73,6 +73,17 @@ class IterationIn(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     status: str = Field(default="planned", pattern="^(planned|active|closed)$")
+
+
+class IterationPatch(BaseModel):
+    """迭代部分更新入参：全部字段可选，支持仅传 status 的状态流转（如前端「激活」）."""
+
+    number: int | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=128)
+    objective: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    status: str | None = Field(default=None, pattern="^(planned|active|closed)$")
 
 
 class IterationOut(BaseModel):

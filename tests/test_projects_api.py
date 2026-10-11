@@ -62,6 +62,44 @@ def test_iteration_state_machine(client: TestClient, iteration: dict[str, Any]) 
     assert closed_ok.json()["status"] == "closed"
 
 
+def test_iteration_partial_update_activation(client: TestClient, iteration: dict[str, Any]) -> None:
+    """仅传 status 的部分更新应成功（前端「激活」按钮路径），其余字段保持不变."""
+    iid = iteration["id"]
+    activated = client.patch(f"/api/v1/iterations/{iid}", json={"status": "active"})
+    assert activated.status_code == 200, activated.text
+    body = activated.json()
+    assert body["status"] == "active"
+    assert body["title"] == iteration["title"]
+    assert body["number"] == iteration["number"]
+
+    # 空 body 无变更
+    noop = client.patch(f"/api/v1/iterations/{iid}", json={})
+    assert noop.status_code == 200
+    assert noop.json()["status"] == "active"
+    assert noop.json()["title"] == iteration["title"]
+
+    # 非空字段显式传 null 视为未变更（时间窗允许传 null 清空）
+    cleared = client.patch(f"/api/v1/iterations/{iid}", json={"start_date": None, "end_date": None, "objective": ""})
+    assert cleared.status_code == 200
+    assert cleared.json()["title"] == iteration["title"]
+    assert cleared.json()["start_date"] is None
+
+    # title 显式传 null 不应触发非空约束错误
+    null_title = client.patch(f"/api/v1/iterations/{iid}", json={"title": None})
+    assert null_title.status_code == 200
+    assert null_title.json()["title"] == iteration["title"]
+
+    # 非法枚举值 422
+    bad = client.patch(f"/api/v1/iterations/{iid}", json={"status": "bogus"})
+    assert bad.status_code == 422
+
+    # closed → planned 非法迁移
+    replan = client.patch(f"/api/v1/iterations/{iid}", json={"status": "closed"})
+    assert replan.status_code == 200
+    replan2 = client.patch(f"/api/v1/iterations/{iid}", json={"status": "planned"})
+    assert replan2.status_code == 400
+
+
 def test_rbac_project_isolation(client: TestClient, project: dict[str, Any]) -> None:
     login_as(client, "designer", "designer123")
     resp = client.get(f"/api/v1/projects/{project['id']}")
