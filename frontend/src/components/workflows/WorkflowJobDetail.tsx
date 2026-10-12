@@ -3,6 +3,7 @@
 import { Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
+import { extractErrorMessage } from '../../api/client';
 import { fetchFindings } from '../../api/rules';
 import { fetchSimResult } from '../../api/simulation';
 import {
@@ -408,8 +409,7 @@ export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDeta
               <FailureIcon size={14} />
               <span>
                 发现项加载失败（检查运行 #{job.check_run_id}）：
-                {(findingsAllQuery.error as Error | null)?.message ?? '未知错误'}
-                ，请刷新页面或检查服务端日志
+                {extractErrorMessage(findingsAllQuery.error)}，请刷新页面或检查服务端日志
               </span>
             </div>
           ) : (
