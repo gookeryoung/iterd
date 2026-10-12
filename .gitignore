@@ -46,6 +46,16 @@ docs/_build/
 node_modules/
 .pnpm-store/
 
+# 前端测试与构建缓存
+/frontend/.eslintcache
+/frontend/coverage/
+/frontend/playwright-report/
+/frontend/test-results/
+/frontend/.auth/
+
+# 前端 E2E 隔离数据目录（scripts/e2e-server.py 每轮全量重建）
+/.e2e-data/
+
 # 前端构建产物（iterd build 生成，随构建变动不入库；仅保留目录占位）
 /src/iterd/static/*
 !/src/iterd/static/.gitkeep

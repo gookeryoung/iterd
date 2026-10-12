@@ -5,7 +5,7 @@ PACKAGE := iterd
 COV_THRESHOLD := 95
 PYTEST_JOBS := 8  # pytest-xdist 并行进程数；Windows 默认 8 避免句柄耗尽
 
-.PHONY: help sync frontend-sync frontend-typecheck frontend-build build b clean c test cov lint typecheck typecheck-ci check doc tox pub bump patch minor major push
+.PHONY: help sync frontend-sync frontend-typecheck frontend-lint frontend-test frontend-check frontend-build e2e build b clean c test cov lint typecheck typecheck-ci check doc tox pub bump patch minor major push
 
 help: ## 显示帮助信息
 	@uv run python -c "import re,sys;ms=[(m.group(1),m.group(2).strip()) for f in sys.argv[1:] for l in open(f,encoding='utf-8') if (m:=re.match(r'^([a-zA-Z][\w -]*):.*?##\s*(.*)',l))];[print(f'  {n:<14} {d}') for n,d in ms]" $(MAKEFILE_LIST)
@@ -22,8 +22,22 @@ subprocess.run(['pnpm','install','--frozen-lockfile'],cwd='frontend',check=True)
 frontend-typecheck ft: frontend-sync ## 前端 TypeScript 类型检查
 	cd frontend && pnpm typecheck
 
+frontend-lint fl: frontend-sync ## 前端 ESLint 检查
+	cd frontend && pnpm lint
+
+frontend-test ftest: frontend-sync ## 前端单元/组件测试（Vitest，不含覆盖率门禁）
+	cd frontend && pnpm test
+
+frontend-check fcheck: frontend-typecheck frontend-lint frontend-test-cov ## 前端全套门禁（typecheck + lint + 覆盖率双门槛）
+
+frontend-test-cov: frontend-sync ## 前端测试并校验覆盖率双门槛（核心集合 + 全局水位）
+	cd frontend && pnpm test:coverage
+
 frontend-build fb: frontend-sync ## 构建前端（Vite，产物输出到 src/iterd/static/）
 	cd frontend && pnpm build
+
+e2e: frontend-build ## 前端 E2E 测试（Playwright：隔离数据目录 + seed 演示数据 + 一键起后端）
+	cd frontend && pnpm e2e
 
 build b: frontend-build ## 构建分发包 (前端 → wheel + sdist)
 	uv build
@@ -31,6 +45,7 @@ build b: frontend-build ## 构建分发包 (前端 → wheel + sdist)
 clean c: ## 清理构建产物与缓存
 	rm -rf build/ dist/ wheels/ *.egg-info htmlcov/ .coverage .coverage.* coverage.xml docs/_build/ .tox/
 	rm -rf .ruff_cache/ .pyrefly_cache/ .mypy_cache/
+	rm -rf frontend/coverage/ frontend/playwright-report/ frontend/test-results/ frontend/.eslintcache
 	find src tests -type d -name __pycache__ -exec rm -rf {} +
 	find src tests -type f -name "*.py[oc]" -delete
 
@@ -51,7 +66,7 @@ typecheck: ## 类型检查 (pyrefly)
 typecheck-ci: ## 类型检查 (pyrefly, CI 平台 linux — 捕获跨平台问题)
 	uv run pyrefly check --python-platform linux
 
-check: lint typecheck typecheck-ci cov ## 运行全套门禁 (lint + typecheck + typecheck-ci + cov)
+check: lint typecheck typecheck-ci cov frontend-check ## 运行全套门禁 (后端 lint/typecheck/cov + 前端 typecheck/lint/覆盖率双门槛)
 
 doc: ## 构建 Sphinx 文档
 	uv run sphinx-build -b html docs docs/_build/html
