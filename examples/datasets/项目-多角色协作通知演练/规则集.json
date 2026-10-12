@@ -1,0 +1,11 @@
+{
+  "_comment": "规则集种子数据。rule_codes 引用 规则库.json 中的 code；规则集经审查模板 rules/check 作业的 with.rule_set 引用生效。",
+  "rule_sets": [
+    {
+      "name": "协作通知检查集",
+      "project_code": null,
+      "description": "全局规则集：文件名规范与材料元数据必填两类 error 级检查",
+      "rule_codes": ["DRAFT-601", "MATL-601"]
+    }
+  ]
+}

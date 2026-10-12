@@ -10,6 +10,7 @@ import { createSubmission, fetchSubmissions, fetchWorkflowRuns } from '../api/wo
 import { extractErrorMessage } from '../api/client';
 import { formatDateTime } from '../utils/format';
 import type { WorkflowRun } from '../types';
+import { isWaitingSummary } from '../types';
 import { RunStatusIcon } from './workflows/RunStatusIcon';
 import WorkflowRunView from './workflows/WorkflowRunView';
 
@@ -51,11 +52,14 @@ function RunRow({
         <Typography.Text strong style={{ fontSize: 13 }}>
           {run.workflow_code} #{run.id}
         </Typography.Text>
-        {run.summary && (
+        {run.summary && !isWaitingSummary(run.summary) && (
           <span style={{ fontSize: 12, color: '#57606a' }}>
             {run.summary.jobs.success} successful / {run.summary.jobs.failure} failed /{' '}
             {run.summary.jobs.skipped} skipped
           </span>
+        )}
+        {run.status === 'waiting' && (
+          <span style={{ fontSize: 12, color: '#9a6700' }}>等待人工会签（待办中心签署后续跑）</span>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 12, color: '#57606a' }}>
           {formatDateTime(run.created_at)}

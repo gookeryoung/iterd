@@ -321,14 +321,54 @@ async def load_workflows(session: AsyncSession, dataset: Path, index: dict[str, 
     return templates
 
 
+async def load_bom(session: AsyncSession, dataset: Path, index: dict[str, Any], actor_id: int) -> dict[str, int]:
+    """载入 BOM 清单（零件清单.csv / 材料清单.csv，可选文件），按零件编码幂等 upsert.
+
+    行可带 项目编码/迭代序号 列显式定位；缺省落到根项目编号最大的迭代（详细设计迭代）。
+    """
+    from iterd.plugins.bom import services as bom_services
+
+    totals = {"created": 0, "updated": 0, "total": 0, "files": 0}
+    for filename in ("零件清单.csv", "材料清单.csv"):
+        path = dataset / filename
+        if not path.is_file():
+            continue
+        rows = read_csv(path)
+        has_location = bool(rows) and "项目编码" in rows[0]
+        fallback: tuple[str, int] | None = None
+        if not has_location:
+            root_code = next(iter(index["projects"]))
+            fallback = (root_code, max(n for code, n in index["iterations"] if code == root_code))
+        groups: dict[tuple[str, int], list[dict[str, str]]] = {}
+        for row in rows:
+            key = (row.get("项目编码", ""), int(row.get("迭代序号") or 0)) if has_location else fallback
+            assert key is not None
+            groups.setdefault(key, []).append(row)
+        for (project_code, number), group_rows in groups.items():
+            iteration = index["iterations"][(project_code, number)]
+            result = await bom_services.import_bom(
+                session,
+                project_id=index["projects"][project_code].id,
+                iteration_id=iteration.id,
+                rows=group_rows,
+                actor_id=actor_id,
+            )
+            for key in ("created", "updated", "total"):
+                totals[key] += result[key]
+        totals["files"] += 1
+    await session.commit()
+    return totals
+
+
 async def load_dataset(session: AsyncSession, dataset: Path, *, actor_id: int) -> dict[str, Any]:
-    """载入单个数据集的数据部分（项目/迭代/产物/规则/规则集/模板/审查模板），返回索引字典。"""
+    """载入单个数据集的数据部分（项目/迭代/产物/规则/规则集/模板/审查模板/BOM），返回索引字典。"""
     index = await load_structure(session, dataset, actor_id)
     versions = await load_artifacts(session, dataset, index, actor_id)
     rules = await load_rules(session, dataset, actor_id)
     sets = await load_rule_sets(session, dataset, index, rules, actor_id)
     templates = await load_sim_templates(session, dataset, index, actor_id)
     workflows = await load_workflows(session, dataset, index, actor_id)
+    bom = await load_bom(session, dataset, index, actor_id)
     return {
         "index": index,
         "versions": versions,
@@ -336,6 +376,7 @@ async def load_dataset(session: AsyncSession, dataset: Path, *, actor_id: int) -
         "sets": sets,
         "templates": templates,
         "workflows": workflows,
+        "bom": bom,
     }
 
 
@@ -368,11 +409,16 @@ async def run_workflows_sync(
         task_id = int(task.id)
         try:
             summary = await workflow_services.execute_workflow_run(session, run_id=run_id)
+            if summary.get("status") == "waiting":
+                # 审批会签作业挂起：seed 预执行到 waiting，待办中心可见，签署后由界面续跑
+                status = "waiting"
+            else:
+                status = "succeeded" if summary.get("conclusion") == "success" else "failed"
             results.append(
                 {
                     "workflow_run_id": run_id,
                     "workflow": run["workflow_code"],
-                    "status": "succeeded" if summary["conclusion"] == "success" else "failed",
+                    "status": status,
                     "summary": summary,
                 }
             )

@@ -6,6 +6,7 @@ import {
   AuditOutlined,
   DeploymentUnitOutlined,
   ExperimentOutlined,
+  FileDoneOutlined,
   LogoutOutlined,
   ProjectOutlined,
   UserOutlined,
@@ -14,6 +15,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { clearCredentials } from '../api/client';
 import { fetchMe } from '../api/auth';
+import NotificationBell from './NotificationBell';
 
 const { Sider, Header, Content } = Layout;
 
@@ -22,6 +24,7 @@ const MENU_ITEMS = [
   { key: '/', icon: <ProjectOutlined />, label: '项目管理' },
   { key: '/rules', icon: <ExperimentOutlined />, label: '规则库' },
   { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '模板管理' },
+  { key: '/approvals', icon: <FileDoneOutlined />, label: '审批待办' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
 ];
 
@@ -32,6 +35,9 @@ function resolveSelectedKey(pathname: string): string {
   }
   if (pathname.startsWith('/workflows')) {
     return '/workflows';
+  }
+  if (pathname.startsWith('/approvals')) {
+    return '/approvals';
   }
   if (pathname.startsWith('/audit')) {
     return '/audit';
@@ -99,12 +105,15 @@ export default function AppLayout() {
             borderBottom: `1px solid ${token.colorBorderSecondary}`,
           }}
         >
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar size="small" icon={<UserOutlined />} />
-              <span>{meQuery.data?.username ?? '加载中'}</span>
-            </Space>
-          </Dropdown>
+          <Space size={12}>
+            <NotificationBell />
+            <Dropdown menu={userMenu} placement="bottomRight">
+              <Space style={{ cursor: 'pointer' }}>
+                <Avatar size="small" icon={<UserOutlined />} />
+                <span>{meQuery.data?.username ?? '加载中'}</span>
+              </Space>
+            </Dropdown>
+          </Space>
         </Header>
         <Content style={{ padding: 24, overflow: 'auto' }}>
           <Outlet />

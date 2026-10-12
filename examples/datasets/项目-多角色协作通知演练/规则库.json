@@ -1,0 +1,25 @@
+{
+  "_comment": "协作通知演练规则库种子数据。checker_type 取值须为 GET /api/v1/checkers 已注册检查器；两条规则均为 error 级：违规件同时命中文件名与元数据两类发现，运行以 failure 终态结束并触发通知。",
+  "rules": [
+    {
+      "code": "DRAFT-601",
+      "name": "图纸文件名规范（通知演练）",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z0-9-]+_rev[A-Z]\\.\\w+$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "产物文件名须形如 CODE_revX.ext"
+    },
+    {
+      "code": "MATL-601",
+      "name": "材料元数据必填（通知演练）",
+      "category": "material",
+      "checker_type": "metadata_required",
+      "params": { "required": { "材料": "str", "尺寸": "str" } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "上传版本时须登记材料牌号与关键尺寸"
+    }
+  ]
+}

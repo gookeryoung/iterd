@@ -32,11 +32,12 @@ function setup(route: string) {
 }
 
 describe('AppLayout 布局', () => {
-  it('渲染四个主导航菜单项与品牌名', () => {
+  it('渲染五个主导航菜单项与品牌名', () => {
     setup('/')
     expect(screen.getByText('项目管理', { selector: '.ant-menu-title-content' })).toBeInTheDocument()
     expect(screen.getByText('规则库', { selector: '.ant-menu-title-content' })).toBeInTheDocument()
     expect(screen.getByText('模板管理', { selector: '.ant-menu-title-content' })).toBeInTheDocument()
+    expect(screen.getByText('审批待办', { selector: '.ant-menu-title-content' })).toBeInTheDocument()
     expect(screen.getByText('审计日志', { selector: '.ant-menu-title-content' })).toBeInTheDocument()
     expect(screen.getByText('项目内容')).toBeInTheDocument()
   })

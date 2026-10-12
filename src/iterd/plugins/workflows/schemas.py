@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -167,4 +167,53 @@ class ProjectRunItemOut(BaseModel):
     trigger: str
     started_at: datetime | None
     finished_at: datetime | None
+    created_at: datetime
+
+
+class ApprovalIn(BaseModel):
+    """审批签署入参."""
+
+    decision: Literal["approved", "rejected"]
+    comment: str = Field(default="", max_length=1024)
+
+
+class ApprovalRecordOut(BaseModel):
+    """审批记录对外结构."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: int
+    run_id: int
+    approver_id: int
+    approver_name: str
+    decision: str
+    comment: str
+    created_at: datetime
+
+
+class ApprovalEntryOut(BaseModel):
+    """待审批列表内嵌审批意见."""
+
+    approver_name: str
+    decision: str
+    comment: str
+    created_at: datetime
+
+
+class PendingApprovalOut(BaseModel):
+    """待审批作业列表项（跨运行汇总）."""
+
+    job_id: int
+    run_id: int
+    workflow_code: str
+    iteration_id: int
+    project_id: int
+    job_key: str
+    job_name: str
+    approvers: list[str]
+    min_count: int
+    approved_count: int
+    approvals: list[ApprovalEntryOut] = []
+    can_approve: bool
     created_at: datetime

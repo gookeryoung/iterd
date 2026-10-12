@@ -1,0 +1,11 @@
+{
+  "_comment": "规则集种子数据。project_code 为 BOM-2026 表示项目级规则集；rule_codes 引用 规则库.json 中的 code；规则集经审查模板 rules/check 作业的 with.rule_set 引用生效，rules/check 编排按检查器轨道自动分流（单产物轨道逐产物执行、context 轨道整迭代执行一次）。",
+  "rule_sets": [
+    {
+      "name": "BOM 一致性边界检查集",
+      "project_code": "BOM-2026",
+      "description": "跨产物检查器演示：BOM 一致性（重量偏差/缺件）与计算书覆盖度",
+      "rule_codes": ["BOM-701", "CMP-701"]
+    }
+  ]
+}

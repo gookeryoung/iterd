@@ -1,0 +1,5 @@
+产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
+DRW-701,机架总装图,drawing,BOM-2026,1,DRW-701_revA.dxf,part_code=FRM-01；重量与 BOM 一致
+MOD-701,机架三维模型,model,BOM-2026,1,MOD-701_revA.step,part_code=FRM-02；重量与 BOM 冲突（18.8 对 21.5）
+DRW-702,护罩零件草图,drawing,BOM-2026,1,DRW-702_revA.dxf,part_code=FRM-03；重量一致但无计算书覆盖
+CAL-701,机架强度计算书,result,BOM-2026,1,CAL-701_revA.csv,covers 元数据覆盖 DRW-701 与 MOD-701

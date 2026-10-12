@@ -1,0 +1,35 @@
+{
+  "_comment": "示例数据预期结果：审查流水线 rules/check 作业产出的 CheckRun.summary 应与 expected_summary 一致（BOM-701 / CMP-701 两条 context 规则整迭代执行一次）；发现项 baseline 中 artifact_code 为 null 表示迭代级发现项（BOM 缺件，无对应产物版本关联），其余经元数据 part_code 关联到具体产物。",
+  "iteration": { "project_code": "BOM-2026", "number": 1 },
+  "rule_set": "BOM 一致性边界检查集",
+  "expected_summary": {
+    "error": 2,
+    "warning": 1,
+    "info": 0,
+    "artifacts": 4,
+    "rules": 2
+  },
+  "expected_findings": [
+    {
+      "rule_code": "BOM-701",
+      "severity": "error",
+      "artifact_code": "MOD-701",
+      "location": "bom:FRM-02",
+      "message_contains": "偏差 12.6% 超过容忍 5%"
+    },
+    {
+      "rule_code": "BOM-701",
+      "severity": "error",
+      "artifact_code": null,
+      "location": "bom:STD-01",
+      "message_contains": "无对应产物"
+    },
+    {
+      "rule_code": "CMP-701",
+      "severity": "warning",
+      "artifact_code": "DRW-702",
+      "location": "DRW-702",
+      "message_contains": "无 result 类计算书覆盖"
+    }
+  ]
+}

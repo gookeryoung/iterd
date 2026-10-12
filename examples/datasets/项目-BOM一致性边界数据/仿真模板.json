@@ -1,0 +1,14 @@
+{
+  "_comment": "仿真模板种子数据。本数据集聚焦跨产物规则检查，仿真模板仅作占位对照组：机架横梁受弯校核（安全系数达标 pass），供手动演示流水线仿真分支使用。",
+  "templates": [
+    {
+      "code": "BOM-BEAM-CHECK",
+      "name": "机架横梁受弯校核（对照组）",
+      "solver_type": "shaft_torsion",
+      "project_code": "BOM-2026",
+      "description": "对照组：300N·m 扭转校核三项指标均满足阈值，结论 pass（与跨产物规则检查无耦合）",
+      "params": { "torque": 300, "diameter": 45, "length": 500, "shear_modulus": 79000, "allowable_shear": 60 },
+      "thresholds": { "max_shear_stress": { "max": 50 }, "twist_angle": { "max": 1.0 }, "safety_factor": { "min": 1.2 } }
+    }
+  ]
+}

@@ -41,13 +41,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 async def _wait_terminal(factory: Any, run_id: int) -> dict[str, Any]:
-    """轮询审查运行至终态并返回最新状态（in-app worker 异步执行）。"""
+    """轮询审查运行至终态或会签挂起并返回最新状态（in-app worker 异步执行）."""
     from iterd.plugins.workflows.models import WorkflowRun
 
     for _ in range(240):
         async with factory() as session:
             run = await session.get(WorkflowRun, run_id)
-            if run is not None and run.status in ("succeeded", "failed"):
+            if run is not None and run.status in ("succeeded", "failed", "waiting"):
+                # waiting：审批会签作业挂起，待办中心签署后由界面续跑
                 return {"status": run.status, "summary": run.summary}
         await asyncio.sleep(0.5)
     return {"status": "timeout", "summary": None}
@@ -165,7 +166,7 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
     from iterd.example_datasets import DEMO_USERS, load_dataset
 
     # 触发全部模型注册（含 simulation 与 tasks）
-    from iterd.plugins import accounts, artifacts, notify, projects, rules, simulation, trace, workflows  # noqa: F401
+    from iterd.plugins import accounts, artifacts, bom, notify, projects, rules, simulation, trace, workflows  # noqa: F401
     from iterd.plugins.accounts.services import get_by_username
     from iterd.plugins.workflows import services as workflow_services
     from iterd.seed import ensure_admin
@@ -200,10 +201,12 @@ async def _load(dataset: Path, args: argparse.Namespace) -> None:
             loaded = await load_dataset(session, dataset, actor_id=admin.id)
         index, sets, templates, versions = loaded["index"], loaded["sets"], loaded["templates"], loaded["versions"]
         workflows = loaded["workflows"]
+        bom = loaded.get("bom", {})
         print(
             f"项目 {len(index['projects'])} 个 / 迭代 {len(index['iterations'])} 个 / "
             f"产物 {len(versions)} 个 / 规则 {len(loaded['rules'])} 条 / "
-            f"规则集 {len(sets)} 个 / 模板 {len(templates)} 个 / 审查模板 {len(workflows)} 个"
+            f"规则集 {len(sets)} 个 / 模板 {len(templates)} 个 / 审查模板 {len(workflows)} 个 / "
+            f"BOM 行 {bom.get('total', 0)} 条"
         )
         print(f"用户就绪: {settings.admin_username} / {' / '.join(DEMO_USERS)}")
 

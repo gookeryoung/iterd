@@ -9,6 +9,7 @@ import { extractErrorMessage } from '../../api/client';
 import { App as AntApp } from 'antd';
 import { useTaskStream } from '../../hooks/useTaskStream';
 import type { WorkflowJob, WorkflowJobStep, WorkflowRun } from '../../types';
+import { isWaitingSummary } from '../../types';
 import { formatDateTime } from '../../utils/format';
 import { JobStatusIcon, PRIMER_COLORS, RunStatusIcon, StepStatusIcon, TriggerBadge } from './RunStatusIcon';
 import WorkflowJobDetail from './WorkflowJobDetail';
@@ -159,7 +160,7 @@ export default function WorkflowRunView({ run, canRun = true }: WorkflowRunViewP
             <span style={{ color: PRIMER_COLORS.accent }}>执行中…</span>
           </Space>
         )}
-        {summary && (
+        {summary && !isWaitingSummary(summary) && (
           <span style={{ color: PRIMER_COLORS.neutral }}>
             <span style={{ color: PRIMER_COLORS.success, fontWeight: 600 }}>{summary.jobs.success} successful</span>
             {' / '}

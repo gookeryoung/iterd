@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from iterd.checkers import ArtifactRef, Finding, get_checker
+from iterd.checkers import ArtifactRef, BomItemRef, Finding, get_checker
 from iterd.core.errors import IterdError, not_found
 from iterd.plugins.artifacts.models import Artifact, ArtifactVersion
 from iterd.plugins.notify import audit
@@ -161,14 +161,14 @@ async def add_rule_to_set(session: AsyncSession, *, rule_set_id: int, rule_id: i
 
 @dataclass
 class FindingRecord:
-    """发现项 + 规则/产物展示信息（报告页免二次查询）。"""
+    """发现项 + 规则/产物展示信息（报告页免二次查询；迭代级发现项产物信息为 None）。"""
 
     finding: CheckFinding
     rule_code: str
     rule_name: str
-    artifact_code: str
-    artifact_name: str
-    version_no: int
+    artifact_code: str | None
+    artifact_name: str | None
+    version_no: int | None
 
 
 async def list_findings(  # noqa: PLR0913 - 过滤参数
@@ -180,12 +180,15 @@ async def list_findings(  # noqa: PLR0913 - 过滤参数
     rule_item_id: int | None = None,
     limit: int = 500,
 ) -> list[FindingRecord]:
-    """结构化报告查询：按严重级别/产物版本/规则过滤，联表带出规则与产物信息。"""
+    """结构化报告查询：按严重级别/产物版本/规则过滤，联表带出规则与产物信息.
+
+    context 检查器的迭代级发现项无产物版本关联（artifact_version_id 为空），产物信息经外联保留为空。
+    """
     stmt = (
         select(CheckFinding, RuleItem, Artifact, ArtifactVersion)
         .join(RuleItem, RuleItem.id == CheckFinding.rule_item_id)
-        .join(ArtifactVersion, ArtifactVersion.id == CheckFinding.artifact_version_id)
-        .join(Artifact, Artifact.id == ArtifactVersion.artifact_id)
+        .join(ArtifactVersion, ArtifactVersion.id == CheckFinding.artifact_version_id, isouter=True)
+        .join(Artifact, Artifact.id == ArtifactVersion.artifact_id, isouter=True)
         .where(CheckFinding.check_run_id == check_run_id)
     )
     if severity is not None:
@@ -201,9 +204,9 @@ async def list_findings(  # noqa: PLR0913 - 过滤参数
             finding=finding,
             rule_code=rule.code,
             rule_name=rule.name,
-            artifact_code=artifact.code,
-            artifact_name=artifact.name,
-            version_no=version.version_no,
+            artifact_code=artifact.code if artifact is not None else None,
+            artifact_name=artifact.name if artifact is not None else None,
+            version_no=version.version_no if version is not None else None,
         )
         for finding, rule, artifact, version in rows
     ]
@@ -246,9 +249,29 @@ async def _load_artifact_refs(session: AsyncSession, iteration_id: int) -> list[
                 version_no=version.version_no,
                 filename=version.filename,
                 metadata=dict(version.metadata_json or {}),
+                category=artifact.category,
             )
         )
     return refs
+
+
+async def _load_bom_item_refs(session: AsyncSession, iteration_id: int) -> list[BomItemRef]:
+    """加载迭代 BOM 行为跨产物检查输入（bom 插件未启用时为空）。"""
+    from iterd.plugins.bom import services as bom_services
+
+    items = await bom_services.list_bom(session, iteration_id=iteration_id)
+    return [
+        BomItemRef(
+            part_code=item.part_code,
+            part_name=item.part_name,
+            material=item.material,
+            spec=item.spec,
+            quantity=item.quantity,
+            unit_weight=item.unit_weight,
+            note=item.note,
+        )
+        for item in items
+    ]
 
 
 async def _load_rule_refs(session: AsyncSession, rule_set_id: int) -> list[tuple[Any, RuleItem]]:
@@ -273,8 +296,12 @@ def _group_rules_by_checker(rules: list[RuleItem]) -> dict[str, list[RuleItem]]:
 async def execute_check_run(
     session: AsyncSession, *, check_run_id: int, progress: Any = None, log: Any = None
 ) -> dict[str, Any]:
-    """执行检查：产物×规则分发到检查器池，findings 先清后写（幂等），聚合 summary."""
+    """执行检查：单产物规则逐产物分发、context 规则整迭代分发，findings 先清后写（幂等），聚合 summary."""
     from asyncio import Semaphore, gather
+
+    from iterd.checkers import CheckContext
+    from iterd.checkers.registry import checker_kind, get_context_checker
+    from iterd.plugins.projects.models import Iteration
 
     check_run = await session.get(CheckRun, check_run_id)
     if check_run is None:
@@ -285,6 +312,21 @@ async def execute_check_run(
 
     artifacts = await _load_artifact_refs(session, check_run.iteration_id)
     grouped_rules = _group_rules_by_checker([r for _, r in await _load_rule_refs(session, check_run.rule_set_id)])
+    artifact_groups = {ct: rules for ct, rules in grouped_rules.items() if checker_kind(ct) == "artifact"}
+    context_groups = {ct: rules for ct, rules in grouped_rules.items() if checker_kind(ct) == "context"}
+    context: CheckContext | None = None
+    if context_groups:
+        iteration = await session.get(Iteration, check_run.iteration_id)
+        if iteration is None:
+            raise not_found(f"迭代不存在: {check_run.iteration_id}")
+        context = CheckContext(
+            project_id=iteration.project_id,
+            iteration_id=iteration.id,
+            iteration_no=iteration.number,
+            iteration_title=iteration.title,
+            artifacts=artifacts,
+            bom_items=await _load_bom_item_refs(session, check_run.iteration_id),
+        )
     if progress is not None:
         progress("加载产物与规则", 10)
 
@@ -308,7 +350,7 @@ async def execute_check_run(
     tasks_total = sum(len(rules) for rules in grouped_rules.values()) * max(len(artifacts), 1)
     done = 0
 
-    async def run_group(checker_type: str, rules: list[RuleItem]) -> list[tuple[ArtifactRef, Finding]]:
+    async def run_group(checker_type: str, rules: list[RuleItem]) -> list[tuple[ArtifactRef | None, Finding]]:
         nonlocal done
         results = await gather(*(check_one(a, checker_type, rules) for a in artifacts))
         done += len(artifacts)
@@ -316,8 +358,22 @@ async def execute_check_run(
             progress("检查执行", int(10 + 80 * done / max(tasks_total, 1)))
         return [pair for part in results for pair in part]
 
-    group_results = await gather(*(run_group(ct, rules) for ct, rules in grouped_rules.items()))
-    pairs: list[tuple[ArtifactRef, Finding]] = [p for part in group_results for p in part]
+    async def run_context_group(checker_type: str, rules: list[RuleItem]) -> list[tuple[ArtifactRef | None, Finding]]:
+        """context 检查器整迭代执行一次（不逐产物分发）。"""
+        if log is not None:
+            log("info", f"跨产物检查 with {checker_type}")
+        checker = get_context_checker(checker_type)
+        assert context is not None
+        rule_refs = [_rule_ref(rule) for rule in rules]
+        return [(None, f) for f in checker.check(context, rule_refs)]
+
+    group_results = await gather(
+        *(
+            [run_group(ct, rules) for ct, rules in artifact_groups.items()]
+            + [run_context_group(ct, rules) for ct, rules in context_groups.items()]
+        )
+    )
+    pairs: list[tuple[ArtifactRef | None, Finding]] = [p for part in group_results for p in part]
     findings = [f for _, f in pairs]
 
     if progress is not None:
@@ -325,10 +381,15 @@ async def execute_check_run(
     # 幂等：重跑先清空自身 findings 再写入
     await session.execute(delete(CheckFinding).where(CheckFinding.check_run_id == check_run.id))
     for artifact, f in pairs:
+        version_id = (
+            f.artifact_version_id
+            if f.artifact_version_id is not None
+            else (artifact.version_id if artifact is not None else None)
+        )
         session.add(
             CheckFinding(
                 check_run_id=check_run.id,
-                artifact_version_id=artifact.version_id,
+                artifact_version_id=version_id,
                 rule_item_id=f.rule_id,
                 severity=f.severity,
                 location=f.location,
@@ -346,7 +407,7 @@ async def execute_check_run(
     check_run.status = "succeeded"
     check_run.finished_at = datetime.now(UTC)
 
-    # 溯源：finding → 产物版本 validated_by
+    # 溯源：finding → 产物版本 validated_by（迭代级发现项无版本关联，仅登记节点）
     await _trace_findings(session, check_run.id, artifacts)
     await session.commit()
     if progress is not None:
@@ -389,7 +450,8 @@ async def _trace_findings(session: AsyncSession, check_run_id: int, artifacts: l
             ref_id=finding.id,
             display_name=finding.message[:80],
         )
-        target = version_urns.get(str(finding.artifact_version_id))
+        # 迭代级发现项（如 BOM 缺件）无版本关联，仅登记发现项节点
+        target = version_urns.get(str(finding.artifact_version_id)) if finding.artifact_version_id is not None else None
         if target:
             await ensure_link(session, src=target, dst=urn, link_type="validated_by")
 

@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     task_heartbeat_timeout: int = 60
     task_max_attempts: int = 3
 
+    # SQLite 并发参数：WAL 模式下写锁等待上限（毫秒），缓解多 worker 并发写锁冲突
+    sqlite_busy_timeout_ms: int = 5000
+
     # 备份：serve 启动时距上次归档超过间隔自动执行一次；0 关闭自动备份
     backup_interval_hours: int = 24
     backup_keep: int = 30  # 备份目录最大保留归档数，超出按时间从旧到新清理

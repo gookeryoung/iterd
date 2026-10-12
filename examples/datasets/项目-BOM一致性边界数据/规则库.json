@@ -1,0 +1,25 @@
+{
+  "_comment": "BOM 一致性边界规则库种子数据。BOM-701 为跨产物（context）检查器 bom_consistency 规则：BOM 零件经产物编码或元数据 part_code 与产物关联，重量偏差超过 weight_tolerance_pct（5%）判 error、无对应产物（编码不匹配或缺件）判 error；CMP-701 为跨产物检查器 iteration_completeness 规则：result 类计算书经 covers 元数据覆盖 drawing/model 产物，未覆盖产物判 warning。",
+  "rules": [
+    {
+      "code": "BOM-701",
+      "name": "BOM 零件与产物一致性",
+      "category": "material",
+      "checker_type": "bom_consistency",
+      "params": { "weight_tolerance_pct": 5 },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "BOM 单件重量与产物元数据 重量kg 偏差超过 5% 判错；BOM 行无对应产物（编码不匹配或缺件）判错；空 BOM 不产生发现项"
+    },
+    {
+      "code": "CMP-701",
+      "name": "计算书覆盖度检查",
+      "category": "process",
+      "checker_type": "iteration_completeness",
+      "params": { "calc_category": "result", "covered_categories": ["drawing", "model"] },
+      "severity_default": "warning",
+      "enabled": true,
+      "description": "drawing/model 类产物须有 result 类计算书经 covers 元数据覆盖，未覆盖产物逐个记 warning"
+    }
+  ]
+}

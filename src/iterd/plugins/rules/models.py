@@ -68,13 +68,15 @@ class CheckRun(Base, TimestampMixin):
 
 
 class CheckFinding(Base, TimestampMixin):
-    """检查发现项：结构化报告记录."""
+    """检查发现项：结构化报告记录（context 迭代级发现项无产物版本关联）."""
 
     __tablename__ = "check_findings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     check_run_id: Mapped[int] = mapped_column(ForeignKey("check_runs.id"), index=True, nullable=False)
-    artifact_version_id: Mapped[int] = mapped_column(ForeignKey("artifact_versions.id"), index=True, nullable=False)
+    artifact_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("artifact_versions.id"), index=True, nullable=True
+    )
     rule_item_id: Mapped[int] = mapped_column(ForeignKey("rule_items.id"), nullable=False)
     severity: Mapped[str] = mapped_column(String(16), nullable=False)
     location: Mapped[str] = mapped_column(String(255), default="", nullable=False)

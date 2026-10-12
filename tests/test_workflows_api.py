@@ -535,6 +535,11 @@ def test_parse_definition_invalid_matrix() -> None:
         "name: X\njobs:\n  a:\n    uses: simulation/run\n    with: {template: [1]}",  # template 类型
         "name: X\njobs:\n  a:\n    uses: simulation/run\n    with: {template: T, artifact: 1}",  # artifact 类型
         "name: X\njobs:\n  a:\n    uses: simulation/run\n    with: {template: T, inputs: [1]}",  # inputs 类型
+        "name: X\njobs:\n  a:\n    uses: approval/request\n    with: {}",  # 审批缺 approvers
+        "name: X\njobs:\n  a:\n    uses: approval/request\n    with: {approvers: []}",  # approvers 空
+        "name: X\njobs:\n  a:\n    uses: approval/request\n    with: {approvers: [1]}",  # approvers 非字符串
+        "name: X\njobs:\n  a:\n    uses: approval/request\n    with: {approvers: [总师], min_count: 0}",  # min_count 非正
+        "name: X\njobs:\n  a:\n    uses: approval/request\n    with: {approvers: [总师], min_count: '2'}",  # min_count 非整数
     ]
     for text in invalid_texts:
         with pytest.raises(WorkflowDefinitionError):
@@ -694,3 +699,213 @@ def test_run_workflows_sync_failure_path(client: TestClient, tmp_path: Path, mon
     assert len(results) == 1
     assert results[0]["status"] == "failed"
     assert results[0]["summary"] is None
+
+
+# ---- 审批会签（流水线内审批作业）----
+
+
+_APPROVAL_DEF = """\
+name: 会签审查
+description: 静态检查通过后人工会签
+
+jobs:
+  rules-check:
+    name: 静态规则检查
+    uses: rules/check
+    with:
+      rule_set: 静态检查集
+  sign-off:
+    name: 总师会签
+    needs: rules-check
+    uses: approval/request
+    with:
+      approvers: [总师, admin]
+      min_count: 1
+"""
+
+_REJECT_DEF = """\
+name: 会签驳回链
+description: 会签驳回时下游仿真跳过
+
+jobs:
+  rules-check:
+    name: 静态规则检查
+    uses: rules/check
+    with:
+      rule_set: 静态检查集
+  sign-off:
+    name: 总师会签
+    needs: rules-check
+    uses: approval/request
+    with:
+      approvers: [admin]
+      min_count: 1
+  beam-sim:
+    name: 横梁静强度仿真
+    needs: sign-off
+    uses: simulation/run
+    with:
+      template: WF-BEAM
+      artifact: FRM-002
+"""
+
+
+def _wait_until_status(client: TestClient, run_id: int, status: str) -> dict[str, Any]:
+    """轮询运行直至进入指定状态。"""
+    run: dict[str, Any] = {}
+    for _ in range(50):
+        run = client.get(f"/api/v1/workflow-runs/{run_id}").json()
+        if run["status"] == status:
+            return run
+        time.sleep(0.2)
+    return run
+
+
+def _user_id(client: TestClient, username: str) -> int:
+    """按用户名取用户 id。"""
+    return int(next(u for u in client.get("/api/v1/users").json() if u["username"] == username)["id"])
+
+
+def _trigger(client: TestClient, iteration_id: int, workflow_id: int) -> dict[str, Any]:
+    """发起一次运行并断言受理。"""
+    created = client.post(f"/api/v1/iterations/{iteration_id}/workflow-runs", json={"workflow_id": workflow_id})
+    assert created.status_code == 202, created.text
+    return created.json()
+
+
+def test_approval_sign_success_and_pending_center(client: TestClient) -> None:
+    """会签通过：运行 waiting 挂起 → 签署 → 续跑成功；待办中心与审批记录可查。"""
+    scenario = _scenario(client, with_bad=False)
+    _prepare_capabilities(client, scenario, stress_max=100)
+    workflow = _create_workflow(client, scenario, definition=_APPROVAL_DEF, code="WF-APPROVAL")
+    run = _trigger(client, scenario["iteration"]["id"], workflow["id"])
+    waiting = _wait_until_status(client, run["id"], "waiting")
+    assert waiting["status"] == "waiting"
+
+    jobs = {j["job_key"]: j for j in waiting["jobs"]}
+    sign = jobs["sign-off"]
+    assert sign["status"] == "waiting"
+    # 发起时固化审批参数
+    assert sign["config"]["approvers"] == ["总师", "admin"]
+    assert sign["config"]["min_count"] == 1
+    steps = {s["step_key"]: s for s in sign["steps"]}
+    assert [s["step_key"] for s in sign["steps"]] == ["setup", "collect", "decide"]
+    assert steps["setup"]["conclusion"] == "success"
+    assert steps["collect"]["status"] == "running"
+
+    # 待办中心：超管可见且可签
+    pending = client.get("/api/v1/approvals/pending").json()
+    entry = next(p for p in pending if p["job_id"] == sign["id"])
+    assert entry["workflow_code"] == "WF-APPROVAL"
+    assert entry["min_count"] == 1 and entry["approved_count"] == 0
+    assert entry["can_approve"] is True
+
+    # 签署 → 会签达成 → 续跑成功
+    signed = client.post(
+        f"/api/v1/workflow-jobs/{sign['id']}/approvals", json={"decision": "approved", "comment": "同意放行"}
+    )
+    assert signed.status_code == 201, signed.text
+    final = _wait_run(client, run["id"])
+    assert final["status"] == "succeeded", final
+    assert final["summary"]["jobs"] == {"success": 2, "failure": 0, "skipped": 0}
+    final_jobs = {j["job_key"]: j for j in final["jobs"]}
+    assert final_jobs["sign-off"]["conclusion"] == "success"
+    decide_logs = next(s for s in final_jobs["sign-off"]["steps"] if s["step_key"] == "decide")["logs"] or []
+    assert any("会签通过" in e["message"] for e in decide_logs)
+
+    # 审批记录可查；重复签署与终态签署均被拒
+    records = client.get(f"/api/v1/workflow-jobs/{sign['id']}/approvals").json()
+    assert [(r["approver_name"], r["decision"], r["comment"]) for r in records] == [("admin", "approved", "同意放行")]
+    dup = client.post(f"/api/v1/workflow-jobs/{sign['id']}/approvals", json={"decision": "approved"})
+    assert dup.status_code == 422 and dup.json()["code"] == "ITERD-INVALID_STATE"  # 已终态：先命中状态校验
+    # 签署后作业不再出现在待办中心
+    assert all(p["job_id"] != sign["id"] for p in client.get("/api/v1/approvals/pending").json())
+
+
+def test_approval_reject_fails_run_and_skips_downstream(client: TestClient) -> None:
+    """会签驳回：作业 failure、运行 failed、下游仿真 skipped。"""
+    scenario = _scenario(client, with_bad=False)
+    _prepare_capabilities(client, scenario, stress_max=100)
+    workflow = _create_workflow(client, scenario, definition=_REJECT_DEF, code="WF-REJECT")
+    run = _trigger(client, scenario["iteration"]["id"], workflow["id"])
+    waiting = _wait_until_status(client, run["id"], "waiting")
+    sign = next(j for j in waiting["jobs"] if j["job_key"] == "sign-off")
+
+    rejected = client.post(
+        f"/api/v1/workflow-jobs/{sign['id']}/approvals", json={"decision": "rejected", "comment": "强度不足"}
+    )
+    assert rejected.status_code == 201, rejected.text
+    final = _wait_run(client, run["id"])
+    assert final["status"] == "failed", final
+    assert final["summary"]["jobs"] == {"success": 1, "failure": 1, "skipped": 1}
+    final_jobs = {j["job_key"]: j for j in final["jobs"]}
+    assert final_jobs["sign-off"]["conclusion"] == "failure"
+    assert final_jobs["beam-sim"]["status"] == "skipped"
+    decide_logs = next(s for s in final_jobs["sign-off"]["steps"] if s["step_key"] == "decide")["logs"] or []
+    assert any("驳回" in e["message"] and "强度不足" in e["message"] for e in decide_logs)
+
+
+def test_approval_multi_sign_scope_and_rbac(client: TestClient) -> None:
+    """min_count=2 多人会签：范围外/门槛不足不可签，两票达成后续跑。"""
+    scenario = _scenario(client, with_bad=False)
+    _prepare_capabilities(client, scenario, stress_max=100)
+    project_id = scenario["project"]["id"]
+    definition = _APPROVAL_DEF.replace("approvers: [总师, admin]", "approvers: [admin, chief]").replace(
+        "min_count: 1", "min_count: 2"
+    )
+    workflow = _create_workflow(client, scenario, definition=definition, code="WF-MULTI")
+    run = _trigger(client, scenario["iteration"]["id"], workflow["id"])
+    waiting = _wait_until_status(client, run["id"], "waiting")
+    sign_id = next(j["id"] for j in waiting["jobs"] if j["job_key"] == "sign-off")
+
+    # 非成员 designer：待办不可见、签署 403
+    login_as(client, "designer", "designer123")
+    assert client.get("/api/v1/approvals/pending").json() == []
+    denied = client.post(f"/api/v1/workflow-jobs/{sign_id}/approvals", json={"decision": "approved"})
+    assert denied.status_code == 403
+
+    # 成员但门槛不足（viewer）：可见不可签
+    login_as(client, "admin", "admin1234")
+    client.put(
+        f"/api/v1/projects/{project_id}/members", json={"user_id": _user_id(client, "designer"), "role": "viewer"}
+    )
+    login_as(client, "designer", "designer123")
+    pending = client.get("/api/v1/approvals/pending").json()
+    entry = next(p for p in pending if p["job_id"] == sign_id)
+    assert entry["can_approve"] is False
+    low_role = client.post(f"/api/v1/workflow-jobs/{sign_id}/approvals", json={"decision": "approved"})
+    assert low_role.status_code == 403
+
+    # 成员 chief（reviewer）用户名命中：可见可签，第一票后仍 waiting
+    login_as(client, "admin", "admin1234")
+    client.post("/api/v1/users", json={"username": "chief", "password": "chief12345"})
+    client.put(
+        f"/api/v1/projects/{project_id}/members", json={"user_id": _user_id(client, "chief"), "role": "reviewer"}
+    )
+    login_as(client, "chief", "chief12345")
+    entry = next(p for p in client.get("/api/v1/approvals/pending").json() if p["job_id"] == sign_id)
+    assert entry["can_approve"] is True
+    first = client.post(f"/api/v1/workflow-jobs/{sign_id}/approvals", json={"decision": "approved"})
+    assert first.status_code == 201, first.text
+    assert client.get(f"/api/v1/workflow-runs/{run['id']}").json()["status"] == "waiting"
+    entry = next(p for p in client.get("/api/v1/approvals/pending").json() if p["job_id"] == sign_id)
+    assert entry["approved_count"] == 1 and len(entry["approvals"]) == 1
+    # 重复签署被拒
+    dup = client.post(f"/api/v1/workflow-jobs/{sign_id}/approvals", json={"decision": "approved"})
+    assert dup.status_code == 422 and dup.json()["code"] == "ITERD-DUPLICATE_APPROVAL"
+
+    # 第二票（admin）达成会签 → 续跑成功
+    login_as(client, "admin", "admin1234")
+    second = client.post(f"/api/v1/workflow-jobs/{sign_id}/approvals", json={"decision": "approved"})
+    assert second.status_code == 201, second.text
+    final = _wait_run(client, run["id"])
+    assert final["status"] == "succeeded", final
+    assert final["summary"]["jobs"] == {"success": 2, "failure": 0, "skipped": 0}
+
+    # 非法决定与对非 waiting 作业签署均 422
+    rules_job_id = next(j["id"] for j in final["jobs"] if j["job_key"] == "rules-check")
+    bad_decision = client.post(f"/api/v1/workflow-jobs/{sign_id}/approvals", json={"decision": "maybe"})
+    assert bad_decision.status_code == 422
+    not_waiting = client.post(f"/api/v1/workflow-jobs/{rules_job_id}/approvals", json={"decision": "approved"})
+    assert not_waiting.status_code == 422 and not_waiting.json()["code"] == "ITERD-INVALID_STATE"
+    assert client.get("/api/v1/workflow-jobs/99999/approvals").status_code == 404

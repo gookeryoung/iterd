@@ -10,14 +10,19 @@ import pytest
 from iterd.checkers import (
     ArtifactCodeConventionChecker,
     ArtifactRef,
+    CheckContext,
     FileExtensionWhitelistChecker,
     FilenameConventionChecker,
+    Finding,
     MetadataRangeChecker,
     MetadataRequiredChecker,
     RuleRef,
     checker_manifest,
     get_checker,
+    get_context_checker,
+    register_context_checker,
     registered_checkers,
+    registered_context_checkers,
 )
 from iterd.core.errors import IterdError
 
@@ -131,13 +136,35 @@ def test_registry() -> None:
         "metadata_required",
         "metadata_range",
     }
+    # 双轨注册表：context 轨道独立于单产物轨道，manifest 汇总两轨并带 kind 标识
+    assert set(registered_context_checkers()) == {"bom_consistency", "iteration_completeness"}
     manifest = checker_manifest()
-    assert {item["checker_type"] for item in manifest} == set(registered_checkers())
+    assert {item["checker_type"] for item in manifest} == set(registered_checkers()) | set(
+        registered_context_checkers()
+    )
+    kinds = {item["checker_type"]: item["kind"] for item in manifest}
+    assert kinds["bom_consistency"] == "context"
+    assert kinds["iteration_completeness"] == "context"
+    assert kinds["metadata_required"] == "artifact"
     assert all(item["description"] for item in manifest)
     assert get_checker("filename_convention") is not None
+    assert get_context_checker("bom_consistency") is not None
     with pytest.raises(IterdError) as exc:
         get_checker("nope")
     assert exc.value.code == "ITERD-CHECKER_ERROR"
+    with pytest.raises(IterdError) as exc_ctx:
+        get_context_checker("metadata_required")
+    assert exc_ctx.value.code == "ITERD-CHECKER_ERROR"
+
+    # 双轨重名视为配置错误（两侧互相拦截）
+    class _Clash:
+        checker_type = "metadata_required"
+
+        def check(self, context: CheckContext, rules: list[RuleRef]) -> list[Finding]:
+            return []
+
+    with pytest.raises(IterdError):
+        register_context_checker(_Clash())  # type: ignore[arg-type]
 
 
 def test_cli_info(capsys: pytest.CaptureFixture[str]) -> None:

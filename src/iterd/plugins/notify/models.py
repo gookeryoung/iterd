@@ -1,4 +1,4 @@
-"""审计日志模型：只增不改，无 UPDATE/DELETE 路径."""
+"""审计日志与站内信通知模型."""
 
 from __future__ import annotations
 
@@ -29,4 +29,22 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), nullable=False)
 
 
-__all__ = ["AuditLog"]
+class Notification(Base):
+    """站内信通知：面向单用户的事件触达记录（已读状态由 read_at 表达）."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    ntype: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    project_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    link: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp(), nullable=False)
+
+
+__all__ = ["AuditLog", "Notification"]

@@ -10,6 +10,7 @@ from iterd.models import Base
 # （autogenerate 与 upgrade 均依赖；部分插件包 __init__ 不导入 models）
 from iterd.plugins.accounts import models as _accounts_models  # noqa: F401
 from iterd.plugins.artifacts import models as _artifacts_models  # noqa: F401
+from iterd.plugins.bom import models as _bom_models  # noqa: F401
 from iterd.plugins.notify import models as _notify_models  # noqa: F401
 from iterd.plugins.projects import models as _projects_models  # noqa: F401
 from iterd.plugins.rules import models as _rules_models  # noqa: F401

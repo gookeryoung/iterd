@@ -9,6 +9,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import IterationDetailPage from './pages/IterationDetailPage';
 import RulesPage from './pages/RulesPage';
 import WorkflowTemplatesPage from './pages/WorkflowTemplatesPage';
+import PendingApprovalsPage from './pages/PendingApprovalsPage';
 import AuditPage from './pages/AuditPage';
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/iterations/:id" element={<IterationDetailPage />} />
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/workflows" element={<WorkflowTemplatesPage />} />
+          <Route path="/approvals" element={<PendingApprovalsPage />} />
           <Route path="/audit" element={<AuditPage />} />
         </Route>
       </Route>

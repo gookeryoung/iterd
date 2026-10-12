@@ -1,0 +1,28 @@
+{
+  "_comment": "示例数据预期结果：seed 预执行后运行停在 waiting 等待人工会签（待办中心可见 sign-off 作业）；rules/check 作业 CheckRun.summary 应与 expected_summary 一致（全绿无发现项）；会签达成后下游纵梁仿真 verdict 为 pass。",
+  "iteration": { "project_code": "CVZ-2026", "number": 1 },
+  "rule_set": "总装会签检查集",
+  "expected_summary": {
+    "error": 0,
+    "warning": 0,
+    "info": 0,
+    "artifacts": 4,
+    "rules": 4
+  },
+  "expected_findings": [],
+  "expected_simulations": [
+    {
+      "template_code": "BEAM-ASM-CHECK",
+      "bind_artifact_code": "DRW-101",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "max_stress": 108.0, "deflection": "≈0.31", "safety_factor": "≈2.18" }
+    }
+  ],
+  "expected_approval": {
+    "job_key": "sign-off",
+    "approvers": ["reviewer", "admin"],
+    "min_count": 1,
+    "seed_status": "waiting"
+  }
+}

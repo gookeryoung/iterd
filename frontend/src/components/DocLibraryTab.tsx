@@ -320,7 +320,7 @@ export default function DocLibraryTab({ projectId }: DocLibraryTabProps) {
       dataIndex: 'version_no',
       key: 'version_no',
       width: 80,
-      render: (value: number) => `v${value}`,
+      render: (value: number | null) => (value != null ? `v${value}` : '迭代级'),
     },
     {
       title: '检查运行',

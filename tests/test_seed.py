@@ -22,6 +22,7 @@ def store(env: Path) -> Generator[tuple[async_sessionmaker[AsyncSession], dict[s
     from iterd.core.database import get_engine, get_session_factory
     from iterd.plugins.accounts import models as accounts_models  # noqa: F401
     from iterd.plugins.artifacts import models as artifacts_models  # noqa: F401
+    from iterd.plugins.bom import models as bom_models  # noqa: F401
     from iterd.plugins.notify import models as notify_models  # noqa: F401
     from iterd.plugins.projects import models as projects_models  # noqa: F401
     from iterd.plugins.rules import models as rules_models  # noqa: F401
@@ -235,8 +236,8 @@ def test_seed_typical_cases(
             for finding, rule_code, artifact_code in _row_tuples(
                 select(CheckFinding, RuleItem.code, Artifact.code)
                 .join(RuleItem, CheckFinding.rule_item_id == RuleItem.id)
-                .join(ArtifactVersion, CheckFinding.artifact_version_id == ArtifactVersion.id)
-                .join(Artifact, ArtifactVersion.artifact_id == Artifact.id)
+                .join(ArtifactVersion, CheckFinding.artifact_version_id == ArtifactVersion.id, isouter=True)
+                .join(Artifact, ArtifactVersion.artifact_id == Artifact.id, isouter=True)
                 .where(CheckFinding.check_run_id == check_run.id)
             )
         ]
@@ -255,3 +256,42 @@ def test_seed_typical_cases(
             assert any(item["message_contains"] in a["message"] for a in matched), (
                 f"{dataset.name}: {item['rule_code']}@{item['artifact_code']} 消息不含 {item['message_contains']!r}"
             )
+
+
+def test_seed_notifications_baseline(
+    store: tuple[async_sessionmaker[AsyncSession], dict[str, Any], dict[str, Any]],
+) -> None:
+    """通知触达基线：数据集 expected_notifications 与实际站内信一致（按项目隔离计数）."""
+    import json
+
+    from iterd.example_datasets import list_datasets
+    from iterd.plugins.accounts.models import User
+    from iterd.plugins.notify.models import Notification
+    from iterd.plugins.projects.models import Project
+
+    if not list_datasets():
+        pytest.skip("非源码仓库（无 examples/datasets），跳过典型案例断言")
+
+    _maker, _summary, _second = store
+    baselines = []
+    for dataset in list_datasets():
+        baseline = json.loads((dataset / "预期检查结果.json").read_text(encoding="utf-8"))
+        if baseline.get("expected_notifications"):
+            baselines.append((dataset, baseline))
+    assert baselines, "至少一个数据集声明通知触达基线"
+
+    for dataset, baseline in baselines:
+        proj = _rows(select(Project).where(Project.code == baseline["iteration"]["project_code"]))[0]
+        users = {u.username: u for u in _rows(select(User))}
+        for username, wanted in baseline["expected_notifications"].items():
+            notifications = _rows(
+                select(Notification).where(
+                    Notification.user_id == users[username].id,
+                    Notification.project_id == proj.id,
+                )
+            )
+            counts: dict[str, int] = {}
+            for item in notifications:
+                counts[item.ntype] = counts.get(item.ntype, 0) + 1
+            want_counts = {w["ntype"]: int(w["count"]) for w in wanted}
+            assert counts == want_counts, f"{dataset.name}: {username} 通知 {counts} 期望 {want_counts}"

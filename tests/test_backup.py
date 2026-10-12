@@ -181,3 +181,63 @@ def test_auto_backup_if_due(seeded_db: Path, env: Path) -> None:
     assert auto_backup_if_due() is None  # 未到间隔
     settings.backup_interval_hours = 0
     assert auto_backup_if_due() is None  # 开关关闭
+
+
+def test_incremental_backup_roundtrip(seeded_db: Path, env: Path) -> None:
+    """增量备份：基线对象跳过、新对象入包；基线+增量还原数据零丢失."""
+    base_archive = create_backup(env / "base.tar.gz")
+    assert inspect_backup(base_archive)["objects"]["base"] == ""
+
+    # 对象零变更：增量对象段为空（仅清单）
+    empty_incremental = create_backup(base=base_archive, output=env / "empty.tar.gz")
+    empty_manifest = inspect_backup(empty_incremental)
+    assert empty_manifest["objects"]["included"] is False and empty_manifest["objects"]["file_count"] == 0
+
+    # 基线后新增一个对象
+    get_storage().put("extra.bin", io.BytesIO(b"extra object content"))
+
+    incremental = create_backup(env / "inc.tar.gz", base=base_archive)
+    manifest = inspect_backup(incremental)
+    assert manifest["objects"]["base"] == base_archive.name
+    assert manifest["objects"]["file_count"] == 1  # 仅新增对象
+
+    # 破坏现场：删除数据库与对象
+    seeded_db.unlink()
+    for obj in get_settings().objects_dir.rglob("*"):
+        if obj.is_file():
+            obj.unlink()
+
+    restore_backup(incremental, base=base_archive)
+    objects = sorted(p.read_bytes() for p in get_settings().objects_dir.rglob("*") if p.is_file())
+    assert objects == [b"demo object content", b"extra object content"]
+
+
+def test_incremental_backup_chain_base_rejected(seeded_db: Path, env: Path) -> None:
+    """增量归档不可作为基线（链式增量会导致还原缺对象），创建与还原两端均拦截."""
+    get_storage().put("extra.bin", io.BytesIO(b"extra"))
+    base_archive = create_backup()
+    incremental = create_backup(base=base_archive, output=env / "inc.tar.gz")
+
+    with pytest.raises(BackupError, match="基线须为全量归档"):
+        create_backup(env / "inc2.tar.gz", base=incremental)
+    with pytest.raises(RestoreError, match="基线归档须为全量归档"):
+        restore_backup(incremental, base=incremental)
+
+
+def test_incremental_restore_requires_matching_base(seeded_db: Path, env: Path) -> None:
+    """增量备份还原缺基线或基线不匹配时报 RestoreError."""
+    base_archive = create_backup(env / "base.tar.gz")
+    get_storage().put("extra.bin", io.BytesIO(b"extra"))
+    incremental = create_backup(env / "inc.tar.gz", base=base_archive)
+
+    with pytest.raises(RestoreError, match="增量备份还原需提供基线归档"):
+        restore_backup(incremental)
+    unrelated = create_backup(env / "unrelated.tar.gz")
+    with pytest.raises(RestoreError, match="基线归档不匹配"):
+        restore_backup(incremental, base=unrelated)
+
+
+def test_incremental_backup_missing_base(seeded_db: Path, env: Path) -> None:
+    """增量备份基线归档不存在时报 BackupError."""
+    with pytest.raises(BackupError, match="基线归档不存在"):
+        create_backup(env / "inc.tar.gz", base=env / "nope.tar.gz")

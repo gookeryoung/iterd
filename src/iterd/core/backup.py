@@ -7,6 +7,11 @@
 输出为 ``.tar.gz`` 归档，内含 ``manifest.json`` 元信息供还原端校验。
 对象存储内容寻址且不可变，跨归档天然去重；多次归档叠加还原等价于最新全量。
 
+增量备份：``create_backup(base=<全量基线归档>)`` —— 基线中已包含的对象跳过不重复打包
+（对象零变更时对象段为空），数据库始终为全量快照；还原时通过 ``restore_backup(base=…)``
+先还原基线对象再叠加增量对象，数据一致性语义与全量还原相同。基线必须为全量归档
+（增量归档不含被跳过的对象，链式增量会导致还原缺对象，创建与还原两端均拦截）。
+
 归档结构::
 
     iterd-backup-<软件版本>-v<manifest版本>-<UTC时间戳>.tar.gz
@@ -69,6 +74,7 @@ class ObjectsInfo:
     included: bool = False
     file_count: int = 0
     total_size: int = 0
+    base: str = ""  # 增量备份的基线归档文件名（全量备份为空串）
 
 
 @dataclass
@@ -150,22 +156,43 @@ def _backup_sqlite_native(db_path: Path, target_dir: Path) -> dict[str, int]:
         conn.close()
 
 
-def _collect_objects(objects_dir: Path, target_dir: Path) -> ObjectsInfo:
-    """收集内容寻址对象目录并复制到归档临时目录，保留 {sha256[:2]}/ 结构."""
+def _collect_objects(objects_dir: Path, target_dir: Path, skip: set[str] | None = None) -> ObjectsInfo:
+    """收集内容寻址对象目录并复制到归档临时目录，保留 {sha256[:2]}/ 结构.
+
+    Args:
+        objects_dir: 对象存储源目录.
+        target_dir: 归档临时目录.
+        skip: 相对路径集合（来自基线归档），命中的对象跳过（增量备份去重）.
+    """
     info = ObjectsInfo(included=False)
     if not objects_dir.is_dir():
         return info
     target_objects = target_dir / _OBJECTS_DIR_NAME
+    excluded = skip or set()
     for src_file in sorted(objects_dir.rglob("*")):
         if not src_file.is_file() or src_file.name.startswith("."):
             continue
-        dst_file = target_objects / src_file.relative_to(objects_dir)
+        rel = src_file.relative_to(objects_dir).as_posix()
+        if rel in excluded:
+            continue
+        dst_file = target_objects / rel
         dst_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_file, dst_file)
         info.file_count += 1
         info.total_size += src_file.stat().st_size
     info.included = info.file_count > 0
     return info
+
+
+def _object_relpaths_in_archive(archive: Path) -> set[str]:
+    """枚举归档内对象成员的相对路径（backup/objects/ 下），供增量备份跳过未变对象."""
+    with tarfile.open(archive, "r:gz") as tar:
+        prefix = f"backup/{_OBJECTS_DIR_NAME}/"
+        return {
+            m.name.removeprefix(prefix)
+            for m in tar.getmembers()
+            if m.isfile() and m.name.startswith(prefix)
+        }
 
 
 def _make_tar_archive(source_dir: Path, output_path: Path) -> None:
@@ -205,8 +232,9 @@ def create_backup(
     keep: int | None = None,
     database_url: str | None = None,
     objects_dir: Path | None = None,
+    base: Path | None = None,
 ) -> Path:
-    """创建完整数据备份.
+    """创建数据备份（base 指定基线归档时为增量备份）.
 
     Args:
         output: 归档输出路径；默认落到配置的 backup_dir，按 ``format_backup_filename``
@@ -216,12 +244,15 @@ def create_backup(
             超出从旧到新清理；仅对默认输出路径生效，显式指定 output 时不轮换。
         database_url: 覆盖配置中的数据库连接串（测试用）.
         objects_dir: 覆盖配置中的对象存储目录（测试用）.
+        base: 增量备份的基线归档（必须为全量备份）—— 基线中已包含的对象跳过
+            不重复打包（对象内容寻址不可变，跳过即去重）；数据库始终为全量快照.
+            还原该归档时必须同时提供同一基线。
 
     Returns:
         备份归档的绝对路径.
 
     Raises:
-        BackupError: 数据库文件不存在或备份过程中发生业务错误.
+        BackupError: 数据库文件不存在、基线归档不可用或备份过程中发生业务错误.
     """
     from iterd.core.config import get_settings
 
@@ -259,7 +290,17 @@ def create_backup(
         )
 
         if include_objects:
-            manifest.objects = _collect_objects(obj_dir, temp_root)
+            skip: set[str] | None = None
+            if base is not None:
+                if not base.is_file():
+                    raise BackupError(f"增量备份基线归档不存在: {base}")
+                base_manifest = inspect_backup(base)
+                if str(base_manifest["objects"].get("base", "")):
+                    raise BackupError(f"增量备份基线须为全量归档（增量归档不含被跳过的对象，链式基线会导致还原缺对象）: {base}")
+                skip = _object_relpaths_in_archive(base)
+            manifest.objects = _collect_objects(obj_dir, temp_root, skip=skip)
+            if base is not None:
+                manifest.objects.base = base.name
             logger.info("对象备份: %d 个文件, %.1f KB", manifest.objects.file_count, manifest.objects.total_size / 1024)
 
         manifest_path = temp_root / "manifest.json"
@@ -376,6 +417,7 @@ def restore_backup(
     include_objects: bool = True,
     database_url: str | None = None,
     objects_dir: Path | None = None,
+    base: Path | None = None,
 ) -> dict[str, Any]:
     """从备份归档完整还原数据库与对象存储.
 
@@ -383,17 +425,21 @@ def restore_backup(
     （不删除目标文件，服务运行中也可恢复）→ 解包 objects（内容寻址，同名覆盖幂等）→
     重置全局引擎/存储单例 → 还原后逐表行数与 manifest 比对，不一致抛 RestoreError。
 
+    增量备份（manifest.objects.base 非空）：需通过 ``base`` 提供基线归档，
+    先还原基线对象、再还原增量对象；数据库不受影响（增量备份中亦为全量快照）。
+
     Args:
         archive: ``.tar.gz`` 备份归档路径.
         include_objects: 是否还原 objects 对象目录.
         database_url: 覆盖配置中的数据库连接串（测试用）.
         objects_dir: 覆盖配置中的对象存储目录（测试用）.
+        base: 增量备份的基线归档路径（文件名须与 manifest.objects.base 一致）.
 
     Returns:
         manifest 字典（含还原结果的行数校验依据）.
 
     Raises:
-        RestoreError: 归档校验失败、目标数据库非 SQLite 或还原后行数校验不一致.
+        RestoreError: 归档校验失败、目标数据库非 SQLite、基线缺失/不匹配或还原后行数校验不一致.
     """
     from iterd.core import database as dbmod
     from iterd.core import storage as stmod
@@ -407,22 +453,50 @@ def restore_backup(
         raise RestoreError(f"还原目标仅支持 SQLite，当前 database_url: {db_url}")
 
     tar, manifest = _read_manifest(archive)
+    objects_base_name = str(manifest["objects"].get("base", ""))
+    if objects_base_name and include_objects:
+        if base is None:
+            raise RestoreError(
+                f"增量备份还原需提供基线归档（manifest 记录基线: {objects_base_name}），请通过 base 参数传入"
+            )
+        base_manifest = inspect_backup(base)
+        if str(base_manifest["objects"].get("base", "")):
+            raise RestoreError(f"基线归档须为全量归档（增量归档不含被跳过的对象）: {base}")
+        if base.name != objects_base_name:
+            raise RestoreError(f"基线归档不匹配: manifest 记录 {objects_base_name}，实际传入 {base.name}")
+
     temp_root = Path(tempfile.mkdtemp(prefix="iterd-restore-", dir=_ensure_tmp_dir(settings)))
+    base_root: Path | None = None
+    base_temp_root: Path | None = None
     try:
         tar.extractall(temp_root, filter="data")
     finally:
         tar.close()
 
     try:
+        if objects_base_name and include_objects and base is not None:
+            base_tar, _ = _read_manifest(base)
+            base_temp_root = Path(tempfile.mkdtemp(prefix="iterd-restore-base-", dir=_ensure_tmp_dir(settings)))
+            try:
+                base_tar.extractall(base_temp_root, filter="data")
+            finally:
+                base_tar.close()
+            base_root = base_temp_root / "backup"
+
         extracted = temp_root / "backup"
         _restore_sqlite(extracted, _resolve_sqlite_path(db_url))
-        if include_objects and (extracted / _OBJECTS_DIR_NAME).is_dir():
-            shutil.copytree(extracted / _OBJECTS_DIR_NAME, obj_dir, dirs_exist_ok=True)
+        if include_objects:
+            if base_root is not None and (base_root / _OBJECTS_DIR_NAME).is_dir():
+                shutil.copytree(base_root / _OBJECTS_DIR_NAME, obj_dir, dirs_exist_ok=True)
+            if (extracted / _OBJECTS_DIR_NAME).is_dir():
+                shutil.copytree(extracted / _OBJECTS_DIR_NAME, obj_dir, dirs_exist_ok=True)
         dbmod.reset_database()
         stmod.reset_storage()
         logger.info("还原完成: %s → %s", archive, db_url)
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
+        if base_temp_root is not None:
+            shutil.rmtree(base_temp_root, ignore_errors=True)
 
     # 还原后校验：逐表行数与 manifest 比对，保证恢复数据零丢失
     conn = sqlite3.connect(str(_resolve_sqlite_path(db_url)))

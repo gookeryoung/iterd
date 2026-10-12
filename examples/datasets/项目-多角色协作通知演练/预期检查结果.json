@@ -1,0 +1,40 @@
+{
+  "_comment": "示例数据预期结果：迭代2 违规件（BAD-601）命中文件名与缺登记尺寸两类 error 发现，NTX-RULES 运行以 failed 终态结束；迭代1 合规件全绿，NTX-SIGN 运行停在 waiting 等待人工会签（待办中心可见 sign-off 作业）。expected_notifications 为通知触达基线：admin（seed 触发者）收到 1 条 run.completed 失败通知，reviewer（成员且用户名命中 approvers）收到 1 条 approval.pending 待办通知，designer（范围外）无任何通知。",
+  "iteration": { "project_code": "NTX-2026", "number": 2 },
+  "rule_set": "协作通知检查集",
+  "expected_summary": {
+    "error": 2,
+    "warning": 0,
+    "info": 0,
+    "artifacts": 1,
+    "rules": 2
+  },
+  "expected_findings": [
+    {
+      "rule_code": "DRAFT-601",
+      "severity": "error",
+      "artifact_code": "BAD-601",
+      "location": "badname.dxf",
+      "message_contains": "不符合规范"
+    },
+    {
+      "rule_code": "MATL-601",
+      "severity": "error",
+      "artifact_code": "BAD-601",
+      "location": "metadata",
+      "message_contains": "缺少必填元数据: 尺寸"
+    }
+  ],
+  "expected_simulations": [],
+  "expected_approval": {
+    "job_key": "sign-off",
+    "approvers": ["reviewer"],
+    "min_count": 1,
+    "seed_status": "waiting"
+  },
+  "expected_notifications": {
+    "admin": [{ "ntype": "run.completed", "count": 1 }],
+    "reviewer": [{ "ntype": "approval.pending", "count": 1 }],
+    "designer": []
+  }
+}

@@ -1,0 +1,50 @@
+# 审查模板种子数据。definition 为工作流 YAML 文本（GitHub Actions 语法子集：jobs/uses/needs/with）；
+# runs 为 seed 预执行的运行绑定（project_code + iteration_number + workflow_code）。
+# 本数据集演示通知触达：
+# - 迭代2 违规件（NTX-RULES）：error 发现使作业 failure、运行 failed，触发者（seed 场景为 admin）
+#   收到 run.completed 失败结论通知；
+# - 迭代1 合规件（NTX-SIGN）：静态检查全绿 → sign-off（approval/request）挂起等待人工签署，
+#   项目 reviewer 成员收到 approval.pending 待办通知；范围外 designer 不产生任何通知。
+templates:
+  - code: NTX-RULES
+    name: 通知演练-纯检查流水线
+    project_code: NTX-2026
+    description: 违规件触发 error 发现，运行失败并通知触发者
+    definition: |
+      name: 通知演练-纯检查
+      description: 静态规则检查发现违规件，运行以 failure 终态结束
+
+      jobs:
+        rules-check:
+          name: 静态规则检查
+          uses: rules/check
+          with:
+            rule_set: 协作通知检查集
+  - code: NTX-SIGN
+    name: 通知演练-会签流水线
+    project_code: NTX-2026
+    description: 静态检查全绿后进入会签（reviewer 用户名命中），产生审批待办通知
+    definition: |
+      name: 通知演练-会签
+      description: 静态规则检查通过后人工会签
+
+      jobs:
+        rules-check:
+          name: 静态规则检查
+          uses: rules/check
+          with:
+            rule_set: 协作通知检查集
+        sign-off:
+          name: 设计会签
+          needs: rules-check
+          uses: approval/request
+          with:
+            approvers: [reviewer]
+            min_count: 1
+runs:
+  - project_code: NTX-2026
+    iteration_number: 2
+    workflow_code: NTX-RULES
+  - project_code: NTX-2026
+    iteration_number: 1
+    workflow_code: NTX-SIGN

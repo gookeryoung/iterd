@@ -11,6 +11,13 @@
         uses: rules/check
         with:
           rule_set: 机架结构设计规范
+      design-signoff:
+        name: 设计校核会签
+        needs: rules-check
+        uses: approval/request
+        with:
+          approvers: [reviewer, 张工]
+          min_count: 1
       beam-sim:
         name: 横梁静强度仿真
         needs: rules-check
@@ -29,8 +36,8 @@ from typing import Any, NoReturn
 
 import yaml
 
-# 作业类型（uses 取值）：静态规则检查 / 动态仿真测试
-JOB_USES = ("rules/check", "simulation/run")
+# 作业类型（uses 取值）：静态规则检查 / 动态仿真测试 / 人工审批会签
+JOB_USES = ("rules/check", "simulation/run", "approval/request")
 
 # job id 约束（对齐 GitHub Actions：小写字母开头，含数字与连字符）
 _JOB_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -42,12 +49,14 @@ _TOP_FIELDS = {"name", "description", "jobs", "on"}
 _WITH_FIELDS: dict[str, set[str]] = {
     "rules/check": {"rule_set"},
     "simulation/run": {"template", "artifact", "inputs"},
+    "approval/request": {"approvers", "min_count"},
 }
 
 # 各 uses 必填的 with 字段
 _WITH_REQUIRED: dict[str, set[str]] = {
     "rules/check": {"rule_set"},
     "simulation/run": {"template"},
+    "approval/request": {"approvers"},
 }
 
 # job 允许字段
@@ -184,6 +193,20 @@ def _validate_with(key: str, uses: str, with_raw: Any) -> None:
         _fail(f"jobs.{key}.with.artifact", "须为产物编码（str）")
     if "inputs" in with_raw and not isinstance(with_raw["inputs"], dict):
         _fail(f"jobs.{key}.with.inputs", "须为映射")
+    if uses == "approval/request":
+        approvers = with_raw.get("approvers")
+        if (
+            not isinstance(approvers, list)
+            or not approvers
+            or not all(isinstance(a, str) and a.strip() for a in approvers)
+        ):
+            _fail(f"jobs.{key}.with.approvers", "须为非空字符串列表（角色名或用户名）")
+        if "min_count" in with_raw and (
+            isinstance(with_raw["min_count"], bool)
+            or not isinstance(with_raw["min_count"], int)
+            or with_raw["min_count"] < 1
+        ):
+            _fail(f"jobs.{key}.with.min_count", "须为正整数（会签通过所需人数）")
 
 
 def _validate_refs(definition: WorkflowDefinition) -> None:

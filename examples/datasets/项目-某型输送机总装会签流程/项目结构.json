@@ -1,0 +1,25 @@
+{
+  "_comment": "某型输送机总装会签流程 —— 演示流水线内审批作业（approval/request）的会签闭环：静态规则检查全绿后运行挂起等待人工会签，签署达成后自动续跑下游仿真。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致。",
+  "project": {
+    "code": "CVZ-2026",
+    "name": "某型输送机总装设计（会签）",
+    "description": "带宽 800mm、机长 36m 带式输送机总装设计，演示静态检查 → 人工会签 → 强度仿真的门禁会签链路。",
+    "status": "active"
+  },
+  "sub_projects": [],
+  "members": [
+    { "username": "designer", "project_code": "CVZ-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "CVZ-2026", "role": "reviewer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "CVZ-2026",
+      "title": "总装设计与会签",
+      "objective": "完成总装图、零件图与三维模型，静态检查通过后进入总师会签，会签达成后执行纵梁静强度仿真",
+      "start_date": "2026-09-01",
+      "end_date": "2026-11-30",
+      "status": "active"
+    }
+  ]
+}

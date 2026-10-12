@@ -1,0 +1,4 @@
+{
+  "_comment": "仿真模板种子数据。本数据集聚焦通知触达演练，不含仿真环节，模板清单为空（审查模板仅使用 rules/check 与 approval/request 作业）。",
+  "templates": []
+}

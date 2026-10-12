@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from iterd.core.errors import IterdError, not_found
+from iterd.core.errors import IterdError, not_found, permission_denied
 from iterd.plugins.notify import audit
 from iterd.plugins.workflows.definition import (
     JobDef,
@@ -160,7 +160,7 @@ async def _resolve_job_config(session: AsyncSession, *, job: JobDef, iteration_i
             )
         config["rule_set_id"] = int(rule_set.id)
         config["rule_set_name"] = rule_set.name
-    else:  # simulation/run
+    elif job.uses == "simulation/run":
         template = await _resolve_sim_template(session, job.with_["template"])
         if template is None:
             raise IterdError(
@@ -189,6 +189,9 @@ async def _resolve_job_config(session: AsyncSession, *, job: JobDef, iteration_i
             config["artifact_version_id"] = version_id
         if "inputs" in job.with_:
             config["inputs"] = dict(job.with_["inputs"])
+    else:  # approval/request
+        config["approvers"] = [str(a) for a in job.with_["approvers"]]
+        config["min_count"] = int(job.with_.get("min_count", 1))
     return config
 
 
@@ -692,15 +695,20 @@ async def _fail_running_step(session: AsyncSession, job: WorkflowJob, exc: Excep
     await session.commit()
 
 
-async def _execute_job(session: AsyncSession, *, run: WorkflowRun, job: WorkflowJob) -> None:
-    """执行单作业：步骤化推进；异常兜底记 failure 并继续（不中断整链）."""
+async def _execute_job(session: AsyncSession, *, run: WorkflowRun, job: WorkflowJob) -> str | None:
+    """执行单作业：步骤化推进；异常兜底记 failure 并继续（不中断整链）.
+
+    返回 "waiting" 表示审批作业进入等待人签（编排暂停，审批决定后恢复）。
+    """
     job_id = int(job.id)  # 固化主键：rollback 后实例过期，禁止再访问 job.id
     job.status = "running"
-    job.started_at = datetime.now(UTC)
+    job.started_at = job.started_at or datetime.now(UTC)
     await session.commit()
     try:
         if job.job_type == "rules":
             await _run_rules_job(session, run=run, job=job)
+        elif job.job_type == "approval":
+            return await _open_approval_job(session, job=job)
         else:
             await _run_simulation_job(session, run=run, job=job)
     except Exception as exc:
@@ -708,6 +716,7 @@ async def _execute_job(session: AsyncSession, *, run: WorkflowRun, job: Workflow
         failed = await session.get(WorkflowJob, job_id)
         if failed is not None:
             await _fail_running_step(session, failed, exc)
+    return None
 
 
 async def _mark_bound_failure(session: AsyncSession, job: WorkflowJob) -> None:
@@ -760,62 +769,117 @@ async def _aggregate_summary(session: AsyncSession, jobs: list[WorkflowJob]) -> 
     }
 
 
+async def _advance_layer_job(  # noqa: PLR0913 - 单作业推进参数
+    session: AsyncSession,
+    *,
+    run_id: int,
+    job_ids: dict[str, int],
+    key: str,
+    job: WorkflowJob,
+    conclusions: dict[str, str | None],
+    done: int,
+    total: int,
+    progress: Any,
+    log: Any,
+) -> tuple[str, dict[str, Any] | None]:
+    """推进拓扑层内单个作业.
+
+    返回 (state, waiting_summary)：state ∈ {"skipped", "done", "waiting"}；
+    waiting 时 waiting_summary 为暂停摘要（其余为 None）。
+    """
+    needs = list(job.needs or [])
+    if any(conclusions.get(dep) != "success" for dep in needs if dep in conclusions):
+        job.status = "skipped"
+        job.conclusion = "skipped"
+        _append_log(job, "warning", "上游作业未通过，本作业跳过")
+        for step in (await job_steps(session, job_ids=[job_ids[key]])).get(job_ids[key], []):
+            step.status = "skipped"
+            step.conclusion = "skipped"
+        await session.commit()
+        return "skipped", None
+    if log is not None:
+        log("info", f"执行作业 {job.name}")
+    current = await session.get(WorkflowRun, run_id)  # 刷新 run：防上游 rollback 过期
+    if current is not None:
+        waiting = await _execute_job(session, run=current, job=job)
+        if waiting == "waiting":
+            # 审批等待人签：运行暂停（终态判定延后到审批决定触发续跑）
+            current.status = "waiting"
+            await session.commit()
+            if progress is not None:
+                progress(f"等待审批 {job.name}", int(100 * done / total))
+            return "waiting", {
+                "status": "waiting",
+                "awaiting_job_key": key,
+                "awaiting_job": job.name,
+                "awaiting_job_id": int(job.id),
+            }
+    return "done", None
+
+
 async def execute_workflow_run(
     session: AsyncSession, *, run_id: int, progress: Any = None, log: Any = None
 ) -> dict[str, Any]:
-    """编排执行：拓扑分层串行跑作业，needs 门禁（上游非 success → skipped），聚合结论."""
+    """编排执行：拓扑分层串行跑作业，needs 门禁（上游非 success → skipped），聚合结论.
+
+    可恢复：已有结论（success/failure/skipped）的作业跳过不重跑；
+    审批作业等待人签时运行置 waiting 并暂停，审批决定后再次进入本函数续跑。
+    """
     run = await session.get(WorkflowRun, run_id)
     if run is None:
         raise not_found(f"审查运行不存在: {run_id}")
+    if run.status in ("succeeded", "failed"):  # 幂等：终态运行不重跑
+        return dict(run.summary or {"conclusion": run.status})
     definition = _validated(run.definition)
     layers = topo_layers(definition)
     run.status = "running"
-    run.started_at = datetime.now(UTC)
+    if run.started_at is None:
+        run.started_at = datetime.now(UTC)
     await session.commit()
 
     jobs = await list_jobs(session, run_id=run_id)
     job_ids = {job.job_key: int(job.id) for job in jobs}
     total = max(len(jobs), 1)
-    done = 0
-    conclusions: dict[str, str | None] = {}
+    done = sum(1 for job in jobs if job.conclusion is not None)
+    conclusions: dict[str, str | None] = {job.job_key: job.conclusion for job in jobs if job.conclusion is not None}
     for layer in layers:
         for key in layer:
             if key not in job_ids:
                 continue
             # 每次迭代重新载入：上游作业异常 rollback 会过期 identity map 中的实例
             job = await session.get(WorkflowJob, job_ids[key])
-            if job is None:
+            if job is None or job.conclusion is not None:  # 恢复续跑：已定结论的作业跳过
                 continue
-            needs = list(job.needs or [])
-            if any(conclusions.get(dep) != "success" for dep in needs if dep in conclusions):
-                job.status = "skipped"
-                job.conclusion = "skipped"
-                _append_log(job, "warning", "上游作业未通过，本作业跳过")
-                for step in (await job_steps(session, job_ids=[job_ids[key]])).get(job_ids[key], []):
-                    step.status = "skipped"
-                    step.conclusion = "skipped"
-                await session.commit()
-                conclusions[key] = "skipped"
-                done += 1
-                if progress is not None:
-                    progress(f"作业 {job.name}", int(100 * done / total))
-                continue
-            if log is not None:
-                log("info", f"执行作业 {job.name}")
-            current = await session.get(WorkflowRun, run_id)  # 刷新 run：防上游 rollback 过期
-            if current is not None:
-                await _execute_job(session, run=current, job=job)
+            state, waiting_summary = await _advance_layer_job(
+                session,
+                run_id=run_id,
+                job_ids=job_ids,
+                key=key,
+                job=job,
+                conclusions=conclusions,
+                done=done,
+                total=total,
+                progress=progress,
+                log=log,
+            )
+            if waiting_summary is not None:
+                return waiting_summary
             done += 1
             if progress is not None:
                 progress(f"作业 {job.name}", int(100 * done / total))
-            refreshed = await session.get(WorkflowJob, job_ids[key])
-            conclusions[key] = refreshed.conclusion if refreshed is not None else None
+            if state == "skipped":
+                conclusions[key] = "skipped"
+            else:
+                refreshed = await session.get(WorkflowJob, job_ids[key])
+                conclusions[key] = refreshed.conclusion if refreshed is not None else None
 
     jobs = await list_jobs(session, run_id=run_id)
     summary = await _aggregate_summary(session, jobs)
+    run = await session.get(WorkflowRun, run_id) or run
     run.summary = summary
     run.status = "failed" if summary["conclusion"] == "failure" else "succeeded"
     run.finished_at = datetime.now(UTC)
+    await _notify_run_finished(session, run=run, summary=summary)
     await session.commit()
     if progress is not None:
         progress("完成", 100)
@@ -840,8 +904,333 @@ async def _workflow_run_executor(session: AsyncSession, payload: dict[str, Any],
     return TaskResult(success=True, summary=summary)
 
 
+# ---- 审批会签（流水线内审批作业）----
+
+
+async def _open_approval_job(session: AsyncSession, *, job: WorkflowJob) -> str:
+    """审批作业首次推进：setup（解析配置）→ collect（挂起等待人签）；返回 "waiting"."""
+    steps = {s.step_key: s for s in (await job_steps(session, job_ids=[int(job.id)])).get(int(job.id), [])}
+    setup, collect, _decide = steps["setup"], steps["collect"], steps["decide"]
+    config = job.config or {}
+    approvers = ", ".join(str(a) for a in config.get("approvers", []))
+    min_count = int(config.get("min_count", 1))
+
+    await _start_step(session, setup)
+    _append_step_log(setup, job, "info", f"审批人范围: {approvers}；会签通过需 {min_count} 人")
+    _finish_step(setup, conclusion="success")
+    await session.commit()
+
+    await _start_step(session, collect)
+    _append_step_log(collect, job, "info", f"等待审批意见（0/{min_count}）")
+    job.status = "waiting"
+    _append_log(job, "warning", f"等待人工审批（需 {min_count} 人通过）")
+    await _notify_approval_pending(session, job=job)
+    await session.commit()
+    return "waiting"
+
+
+async def _project_role_for_job(session: AsyncSession, job: WorkflowJob, user: Any) -> tuple[int | None, Any]:
+    """取审批作业所属项目 id 与用户在该项目的角色（供路由鉴权与资格判定复用）。"""
+    from iterd.plugins.accounts.models import User
+    from iterd.plugins.projects import rbac
+    from iterd.plugins.projects.models import Iteration
+
+    run = await session.get(WorkflowRun, job.run_id)
+    iteration = await session.get(Iteration, run.iteration_id) if run is not None else None
+    project_id = int(iteration.project_id) if iteration is not None else None
+    user_obj = user if isinstance(user, User) else None
+    if project_id is None or user_obj is None:
+        return project_id, None
+    role = await rbac.get_project_role(session, project_id, int(user_obj.id), user_obj.is_superuser)
+    return project_id, role
+
+
+async def _hit_approvers_scope(session: AsyncSession, *, job: WorkflowJob, user: Any) -> bool:
+    """approvers 清单命中判断：用户名直接命中，或角色达到清单中任一角色门槛."""
+    from iterd.plugins.accounts.models import User
+    from iterd.plugins.projects import rbac
+
+    if isinstance(user, User) and user.is_superuser:
+        return True
+    approvers = [str(a) for a in (job.config or {}).get("approvers", [])]
+    username = getattr(user, "username", "") or ""
+    if username in approvers:
+        return True
+    role_names = [a for a in approvers if a in rbac.Role.__members__]
+    if not role_names:
+        return False
+    _project_id, role = await _project_role_for_job(session, job, user)
+    return role is not None and any(rbac.role_at_least(role, rbac.Role(name)) for name in role_names)
+
+
+async def job_approvals(session: AsyncSession, *, job_id: int) -> list[Any]:
+    """作业的审批记录（按 id 升序）。"""
+    from iterd.plugins.workflows.models import ApprovalRecord
+
+    return list(
+        (
+            await session.execute(
+                select(ApprovalRecord).where(ApprovalRecord.job_id == job_id).order_by(ApprovalRecord.id)
+            )
+        ).scalars()
+    )
+
+
+async def get_approval_job(session: AsyncSession, job_id: int) -> WorkflowJob:
+    """取作业，不存在抛 404。"""
+    job = await session.get(WorkflowJob, job_id)
+    if job is None:
+        raise not_found(f"流水线作业不存在: {job_id}")
+    return job
+
+
+async def _close_approval_job(session: AsyncSession, *, job: WorkflowJob, conclusion: str, note: str) -> None:
+    """审批判定落定：collect 收口 → decide 结论 → 作业终态."""
+    steps = {s.step_key: s for s in (await job_steps(session, job_ids=[int(job.id)])).get(int(job.id), [])}
+    collect, decide = steps["collect"], steps["decide"]
+    _finish_step(collect, conclusion="success")
+    await _start_step(session, decide)
+    level = "info" if conclusion == "success" else "error"
+    _append_step_log(decide, job, level, note)
+    _finish_step(decide, conclusion=conclusion)
+    job.status = "succeeded"
+    job.conclusion = conclusion
+    job.finished_at = datetime.now(UTC)
+    _append_log(job, level, note)
+    await session.commit()
+
+
+async def record_approval(
+    session: AsyncSession, *, actor: Any, job_id: int, decision: str, comment: str
+) -> tuple[Any, dict[str, Any] | None]:
+    """记录一次审批决定；达成会签条件或遇驳回时恢复流水线续跑.
+
+    返回 (审批记录, 恢复后的运行摘要)；未达会签条件时摘要为 None。
+    """
+    from iterd.plugins.notify import audit
+    from iterd.plugins.workflows.models import APPROVAL_DECISIONS, ApprovalRecord
+
+    if decision not in APPROVAL_DECISIONS:
+        raise IterdError(f"非法审批决定: {decision!r}", code="ITERD-INVALID_STATE", status_code=422)
+    job = await get_approval_job(session, job_id)
+    if job.job_type != "approval" or job.status != "waiting":
+        raise IterdError(
+            f"作业当前状态为 {job.status}，仅等待审批（waiting）的审批作业可签",
+            code="ITERD-INVALID_STATE",
+            status_code=422,
+        )
+    if not await _hit_approvers_scope(session, job=job, user=actor):
+        raise permission_denied("当前用户不在本作业审批人范围（approvers）内")
+
+    dup = (
+        await session.execute(
+            select(ApprovalRecord.id).where(ApprovalRecord.job_id == job_id, ApprovalRecord.approver_id == actor.id)
+        )
+    ).scalar_one_or_none()
+    if dup is not None:
+        raise IterdError("同一审批人对同一作业仅可签署一次", code="ITERD-DUPLICATE_APPROVAL", status_code=422)
+
+    record = ApprovalRecord(
+        job_id=job_id,
+        run_id=int(job.run_id),
+        approver_id=int(actor.id),
+        approver_name=str(actor.username),
+        decision=decision,
+        comment=comment,
+    )
+    session.add(record)
+    await audit(
+        session,
+        actor_id=int(actor.id),
+        actor_name=str(actor.username),
+        action="approval.record",
+        resource_type="workflow_job",
+        resource_id=job_id,
+        after={"decision": decision, "comment": comment},
+    )
+    approval_run = await session.get(WorkflowRun, job.run_id)
+    if approval_run is not None:
+        await _notify_approval_recorded(session, run=approval_run, actor=actor, decision=decision)
+    await session.commit()  # 先落记录再推进，续跑异常不丢签署
+
+    config = job.config or {}
+    min_count = int(config.get("min_count", 1))
+    if decision == "rejected":
+        await _close_approval_job(
+            session, job=job, conclusion="failure", note=f"{actor.username} 驳回：{comment or '无意见'}"
+        )
+        summary = await execute_workflow_run(session, run_id=int(job.run_id))
+        return record, summary
+    approvals = await job_approvals(session, job_id=job_id)
+    passed = sum(1 for r in approvals if r.decision == "approved")
+    if passed >= min_count:
+        await _close_approval_job(session, job=job, conclusion="success", note=f"会签通过（{passed}/{min_count}）")
+        summary = await execute_workflow_run(session, run_id=int(job.run_id))
+        return record, summary
+    steps = (await job_steps(session, job_ids=[int(job.id)])).get(int(job.id), [])
+    for step in steps:
+        if step.step_key == "collect" and step.status == "running":
+            step.logs = [
+                *(step.logs or []),
+                {"ts": _step_ts(job), "level": "info", "message": f"已收 {passed}/{min_count} 项通过，继续等待"},
+            ]
+    await session.commit()
+    return record, None
+
+
+async def list_pending_approvals(
+    session: AsyncSession, *, user: Any, project_id: int | None = None
+) -> list[dict[str, Any]]:
+    """当前用户可见的待审批作业列表（waiting 态审批作业，跨运行汇总）.
+
+    可见性：超级管理员全部；否则须对所属项目具备 viewer+ 角色（含父项目继承）。
+    """
+    from iterd.plugins.projects import rbac
+    from iterd.plugins.projects.models import Iteration
+
+    stmt = (
+        select(WorkflowJob, WorkflowRun, Iteration)
+        .join(WorkflowRun, WorkflowJob.run_id == WorkflowRun.id)
+        .join(Iteration, WorkflowRun.iteration_id == Iteration.id)
+        .where(WorkflowJob.job_type == "approval", WorkflowJob.status == "waiting")
+        .order_by(WorkflowJob.id)
+    )
+    if project_id is not None:
+        stmt = stmt.where(Iteration.project_id == project_id)
+    rows = (await session.execute(stmt)).all()
+    items: list[dict[str, Any]] = []
+    for job, run, iteration in rows:
+        if not user.is_superuser:
+            role = await rbac.get_project_role(
+                session, int(iteration.project_id), int(user.id), False, include_ancestor=True
+            )
+            if role is None or not rbac.role_at_least(role, rbac.Role.viewer):
+                continue
+        approvals = await job_approvals(session, job_id=int(job.id))
+        eligible = await _hit_approvers_scope(session, job=job, user=user)
+        config = job.config or {}
+        items.append(
+            {
+                "job_id": int(job.id),
+                "run_id": int(run.id),
+                "workflow_code": run.workflow_code,
+                "iteration_id": int(iteration.id),
+                "project_id": int(iteration.project_id),
+                "job_key": job.job_key,
+                "job_name": job.name,
+                "approvers": [str(a) for a in config.get("approvers", [])],
+                "min_count": int(config.get("min_count", 1)),
+                "approved_count": sum(1 for r in approvals if r.decision == "approved"),
+                "approvals": [
+                    {
+                        "approver_name": r.approver_name,
+                        "decision": r.decision,
+                        "comment": r.comment,
+                        "created_at": r.created_at,
+                    }
+                    for r in approvals
+                ],
+                "can_approve": eligible,
+                "created_at": job.created_at,
+            }
+        )
+    return items
+
+
 def register_executors() -> None:
     """向任务框架注册本插件的执行器（app 启动时调用）。"""
     from iterd.tasks.executor import register_executor
 
     register_executor("workflow_run", _workflow_run_executor)
+
+
+# ---- 域事件 → 站内信（迭代 2：运行终态 / 审批待办 / 审批结果三类事件源）----
+
+
+async def _notify_run_finished(session: AsyncSession, *, run: WorkflowRun, summary: dict[str, Any]) -> None:
+    """运行到达终态：站内信通知运行触发者（含结论与计数摘要）。"""
+    from iterd.plugins.notify import notify
+    from iterd.plugins.projects.models import Iteration
+
+    if run.created_by is None:
+        return
+    iteration = await session.get(Iteration, run.iteration_id)
+    jobs = summary.get("jobs") or {}
+    findings = summary.get("findings") or {}
+    conclusion = str(summary.get("conclusion", run.status))
+    body = (
+        f"结论 {conclusion}；作业 {jobs.get('success', 0)} 成功 / {jobs.get('failure', 0)} 失败 /"
+        f" {jobs.get('skipped', 0)} 跳过；发现 error {findings.get('error', 0)} 条"
+    )
+    await notify(
+        session,
+        user_id=int(run.created_by),
+        ntype="run.completed",
+        title=f"审查运行 {run.workflow_code} #{run.id} 已完成",
+        body=body,
+        project_id=int(iteration.project_id) if iteration is not None else None,
+        link=f"/iterations/{run.iteration_id}",
+        resource_type="workflow_run",
+        resource_id=run.id,
+    )
+
+
+async def _notify_approval_pending(session: AsyncSession, *, job: WorkflowJob) -> None:
+    """审批作业挂起：站内信通知 approvers 范围内可签署的项目成员（沿项目树继承判定）."""
+    from iterd.plugins.accounts.models import User
+    from iterd.plugins.notify import notify
+    from iterd.plugins.projects.models import Iteration, ProjectMember
+
+    run = await session.get(WorkflowRun, job.run_id)
+    iteration = await session.get(Iteration, run.iteration_id) if run is not None else None
+    if run is None or iteration is None:
+        return
+    config = job.config or {}
+    min_count = int(config.get("min_count", 1))
+    members = (
+        (
+            await session.execute(
+                select(User)
+                .join(ProjectMember, ProjectMember.user_id == User.id)
+                .where(ProjectMember.project_id == iteration.project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for user in members:
+        if not await _hit_approvers_scope(session, job=job, user=user):
+            continue
+        await notify(
+            session,
+            user_id=int(user.id),
+            ntype="approval.pending",
+            title=f"会签待办：{run.workflow_code} #{run.id} {job.name}",
+            body=f"作业「{job.name}」等待会签（需 {min_count} 人通过），请前往审批待办中心签署。",
+            project_id=int(iteration.project_id),
+            link="/approvals",
+            resource_type="workflow_job",
+            resource_id=job.id,
+        )
+
+
+async def _notify_approval_recorded(session: AsyncSession, *, run: WorkflowRun, actor: Any, decision: str) -> None:
+    """审批签署落定：站内信通知运行触发者（触发者本人签署时不自扰）。"""
+    from iterd.plugins.notify import notify
+    from iterd.plugins.projects.models import Iteration
+
+    if run.created_by is None or int(run.created_by) == int(actor.id):
+        return
+    iteration = await session.get(Iteration, run.iteration_id)
+    decision_text = "通过" if decision == "approved" else "驳回"
+    await notify(
+        session,
+        user_id=int(run.created_by),
+        ntype="approval.recorded",
+        title=f"会签进展：{run.workflow_code} #{run.id}（{actor.username} {decision_text}）",
+        body=f"{actor.username} 签署意见：{decision_text}。流水线将按会签结果自动推进。",
+        project_id=int(iteration.project_id) if iteration is not None else None,
+        link=f"/iterations/{run.iteration_id}",
+        resource_type="workflow_run",
+        resource_id=run.id,
+    )

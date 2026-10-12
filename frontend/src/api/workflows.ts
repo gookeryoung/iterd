@@ -2,7 +2,10 @@
 
 import { api } from './client';
 import type {
+  ApprovalInput,
+  ApprovalRecord,
   IterationSubmission,
+  PendingApproval,
   ProjectRunItem,
   SubmissionInput,
   WorkflowRun,
@@ -98,5 +101,25 @@ export async function fetchWorkflowRun(runId: number): Promise<WorkflowRun> {
 /** 以运行快照重新执行（生成新 run）。 */
 export async function rerunWorkflowRun(runId: number): Promise<WorkflowRun> {
   const resp = await api.post<WorkflowRun>(`/workflow-runs/${runId}/rerun`);
+  return resp.data;
+}
+
+/** 待审批作业列表（跨运行汇总；project_id 过滤可选）。 */
+export async function fetchPendingApprovals(projectId?: number): Promise<PendingApproval[]> {
+  const resp = await api.get<PendingApproval[]>('/approvals/pending', {
+    params: projectId !== undefined ? { project_id: projectId } : undefined,
+  });
+  return resp.data;
+}
+
+/** 作业的审批记录（按 id 升序）。 */
+export async function fetchJobApprovals(jobId: number): Promise<ApprovalRecord[]> {
+  const resp = await api.get<ApprovalRecord[]>(`/workflow-jobs/${jobId}/approvals`);
+  return resp.data;
+}
+
+/** 签署审批意见（达成会签条件时后端同步续跑流水线）。 */
+export async function recordApproval(jobId: number, data: ApprovalInput): Promise<ApprovalRecord> {
+  const resp = await api.post<ApprovalRecord>(`/workflow-jobs/${jobId}/approvals`, data);
   return resp.data;
 }

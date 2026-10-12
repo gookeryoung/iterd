@@ -1,0 +1,5 @@
+﻿产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
+ASM-001,输送机总装图,drawing,CVZ-2026,1,ASM-001_revA.dxf,合规命名与齐全元数据
+DRW-101,纵梁零件图,drawing,CVZ-2026,1,DRW-101_revA.dxf,会签后仿真绑定产物
+MOD-101,总装三维模型,model,CVZ-2026,1,MOD-101_revA.step,STEP 中性格式
+SPC-101,总装技术要求,spec,CVZ-2026,1,SPC-101_revA.md,焊接与涂装技术要求

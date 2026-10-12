@@ -243,20 +243,20 @@ export interface CheckSummary {
   rules: number;
 }
 
-/** 检查发现项（含规则与产物展示信息）。 */
+/** 检查发现项（含规则与产物展示信息；迭代级发现项产物信息为空）。 */
 export interface Finding {
   id: number;
   check_run_id: number;
-  artifact_version_id: number;
+  artifact_version_id: number | null;
   rule_item_id: number;
   severity: Severity;
   location: string;
   message: string;
   rule_code: string;
   rule_name: string;
-  artifact_code: string;
-  artifact_name: string;
-  version_no: number;
+  artifact_code: string | null;
+  artifact_name: string | null;
+  version_no: number | null;
 }
 
 /** 仿真作业状态（状态机：pending -> running -> succeeded/failed）。 */
@@ -391,11 +391,11 @@ export interface AuditLog {
 
 // ---- 审查流水线（workflows）----
 
-/** 审查运行状态。 */
-export type WorkflowRunStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+/** 审查运行状态（waiting = 审批会签挂起，待人工签署后续跑）。 */
+export type WorkflowRunStatus = 'pending' | 'running' | 'waiting' | 'succeeded' | 'failed';
 
-/** 流水线作业状态。 */
-export type WorkflowJobStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
+/** 流水线作业状态（waiting = 审批作业等待人签）。 */
+export type WorkflowJobStatus = 'pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped';
 
 /** 作业结论（GitHub Actions 语义）。 */
 export type WorkflowConclusion = 'success' | 'failure' | 'skipped';
@@ -471,7 +471,7 @@ export interface WorkflowJob {
   run_id: number;
   job_key: string;
   name: string;
-  job_type: 'rules' | 'simulation';
+  job_type: 'rules' | 'simulation' | 'approval';
   needs: string[] | null;
   config: Record<string, unknown> | null;
   status: WorkflowJobStatus;
@@ -499,6 +499,26 @@ export interface WorkflowRunSummary {
   sims: { pass: number; fail: number };
 }
 
+/** 会签挂起摘要（运行 waiting 时的 summary 结构）。 */
+export interface WorkflowWaitingSummary {
+  status: 'waiting';
+  awaiting_job_key: string;
+  awaiting_job: string;
+  awaiting_job_id: number;
+}
+
+/** 判定运行 summary 是否为会签挂起摘要。 */
+export function isWaitingSummary(
+  summary: WorkflowRunSummary | WorkflowWaitingSummary | null | undefined,
+): summary is WorkflowWaitingSummary {
+  return (
+    summary !== null &&
+    summary !== undefined &&
+    'status' in summary &&
+    (summary as { status?: string }).status === 'waiting'
+  );
+}
+
 /** 运行触发方式（GitHub Actions 语义：push=方案提交，手动=manual，rerun=重新运行）。 */
 export type WorkflowTrigger = 'submission' | 'manual' | 'rerun';
 
@@ -510,7 +530,7 @@ export interface WorkflowRun {
   workflow_code: string;
   definition: string;
   status: WorkflowRunStatus;
-  summary: WorkflowRunSummary | null;
+  summary: WorkflowRunSummary | WorkflowWaitingSummary | null;
   created_by: number | null;
   submission_id: number | null;
   trigger: WorkflowTrigger;
@@ -537,6 +557,54 @@ export interface IterationSubmission {
   submitted_by: number | null;
   created_at: string;
   runs: WorkflowRun[];
+}
+
+// ---- 审批会签（流水线内审批作业）----
+
+/** 审批决定。 */
+export type ApprovalDecision = 'approved' | 'rejected';
+
+/** 审批签署入参。 */
+export interface ApprovalInput {
+  decision: ApprovalDecision;
+  comment?: string;
+}
+
+/** 审批记录（单次签署）。 */
+export interface ApprovalRecord {
+  id: number;
+  job_id: number;
+  run_id: number;
+  approver_id: number;
+  approver_name: string;
+  decision: ApprovalDecision;
+  comment: string;
+  created_at: string;
+}
+
+/** 待审批列表内嵌审批意见。 */
+export interface ApprovalEntry {
+  approver_name: string;
+  decision: ApprovalDecision;
+  comment: string;
+  created_at: string;
+}
+
+/** 待审批作业（跨运行汇总，待办中心列表项）。 */
+export interface PendingApproval {
+  job_id: number;
+  run_id: number;
+  workflow_code: string;
+  iteration_id: number;
+  project_id: number;
+  job_key: string;
+  job_name: string;
+  approvers: string[];
+  min_count: number;
+  approved_count: number;
+  approvals: ApprovalEntry[];
+  can_approve: boolean;
+  created_at: string;
 }
 
 /** 严重级别中文标签映射。 */
@@ -567,12 +635,12 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   stale: '已过期',
 };
 
-/** 项目审查状态聚合中的单条发现项。 */
+/** 项目审查状态聚合中的单条发现项（迭代级发现项产物信息为空）。 */
 export interface ReviewFinding {
   id: number;
   check_run_id: number;
-  artifact_version_id: number;
-  version_no: number;
+  artifact_version_id: number | null;
+  version_no: number | null;
   rule_id: number;
   rule_code: string;
   rule_name: string;
@@ -621,6 +689,26 @@ export interface ProjectRunItem {
   created_at: string;
 }
 
+// ---- 站内信通知 ----
+
+/** 通知类型（域事件源标识）。 */
+export type NotificationNType = 'run.completed' | 'approval.pending' | 'approval.recorded' | (string & {});
+
+/** 站内信通知。 */
+export interface NotificationItem {
+  id: number;
+  user_id: number;
+  ntype: NotificationNType;
+  title: string;
+  body: string;
+  project_id: number | null;
+  link: string;
+  resource_type: string;
+  resource_id: string;
+  read_at: string | null;
+  created_at: string;
+}
+
 /** 规则分类中文标签映射。 */
 export const RULE_CATEGORY_LABELS: Record<RuleCategory, string> = {
   drafting: '制图',
@@ -645,10 +733,88 @@ export const ITERATION_STATUS_LABELS: Record<IterationStatus, string> = {
   closed: '已关闭',
 };
 
+// ---- 迭代对比与审查报告 ----
+
+/** 迭代简要信息（diff 双方标识）。 */
+export interface IterationBrief {
+  id: number;
+  number: number;
+  title: string;
+  status: IterationStatus;
+}
+
+/** 字段级变更（产物编码或零件编码维度）。 */
+export interface FieldChange {
+  code?: string;
+  part_code?: string;
+  field: string;
+  base: unknown;
+  current: unknown;
+}
+
+/** 键控实体集合差异（产物 / BOM 通用）。 */
+export interface EntryDiff {
+  added: Record<string, unknown>[];
+  removed: Record<string, unknown>[];
+  changed: FieldChange[];
+}
+
+/** 检查发现项计数。 */
+export interface SeverityCounts {
+  error: number;
+  warning: number;
+  info: number;
+}
+
+/** 仿真结论快照。 */
+export interface SimSnapshot {
+  verdict: 'pass' | 'fail';
+  failures: number;
+}
+
+/** 运行审批摘要。 */
+export interface ApprovalSummary {
+  approved: number;
+  rejected: number;
+  pending_jobs: number;
+}
+
+/** 迭代对比结果：产物 / BOM / 结论计数 / 仿真 / 审批五段差异。 */
+export interface IterationDiff {
+  iteration: IterationBrief;
+  baseline: IterationBrief | null;
+  note: string;
+  artifacts: EntryDiff;
+  bom: EntryDiff;
+  findings: { baseline: SeverityCounts | null; current: SeverityCounts | null };
+  sims: { baseline: SimSnapshot | null; current: SimSnapshot | null };
+  approvals: { baseline: ApprovalSummary | null; current: ApprovalSummary | null };
+}
+
+/** 审查报告（Markdown 文本）。 */
+export interface ReportData {
+  iteration_id: number;
+  generated_at: string;
+  markdown: string;
+}
+
+/** 报告归档结果。 */
+export interface ArchiveReportResult {
+  artifact_id: number;
+  artifact_code: string;
+  version_no: number;
+}
+
 /** 仿真作业状态中文标签映射。 */
 export const SIM_JOB_STATUS_LABELS: Record<SimJobStatus, string> = {
   pending: '排队中',
   running: '求解中',
   succeeded: '已完成',
   failed: '失败',
+};
+
+/** 审批决定中文标签映射。 */
+export const APPROVAL_DECISION_LABELS: Record<ApprovalDecision, string> = {
+  approved: '通过',
+  rejected: '驳回',
 };

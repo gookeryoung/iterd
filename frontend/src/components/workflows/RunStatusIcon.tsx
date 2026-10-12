@@ -1,6 +1,11 @@
 /** GitHub octicon 风格状态图标（内联 SVG 自绘，不新增图标依赖）。 */
 
-import type { WorkflowConclusion, WorkflowJobStatus, WorkflowRunStatus } from '../../types';
+import type {
+  WorkflowConclusion,
+  WorkflowJobStatus,
+  WorkflowRunStatus,
+  WorkflowWaitingSummary,
+} from '../../types';
 
 /** Primer 语义色。 */
 export const PRIMER_COLORS = {
@@ -104,7 +109,17 @@ export function SkippedIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-/** 作业状态 → 图标（GitHub Actions 语义）。 */
+/** 等待人工（暂停双竖线，琥珀色调，区别于排队/跳过）。 */
+export function WaitingIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-label="等待审批">
+      <circle cx="8" cy="8" r="6" fill="#fff8c5" stroke="#9a6700" strokeWidth="1.6" />
+      <path d="M6.2 5.2v5.6M9.8 5.2v5.6" stroke="#9a6700" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** 作业状态 → 图标（GitHub Actions 语义，waiting 为审批挂起）。 */
 export function JobStatusIcon({ status, conclusion }: { status: WorkflowJobStatus; conclusion: WorkflowConclusion | null }) {
   if (conclusion === 'skipped' || status === 'skipped') {
     return <SkippedIcon />;
@@ -115,18 +130,31 @@ export function JobStatusIcon({ status, conclusion }: { status: WorkflowJobStatu
   if (conclusion === 'failure' || status === 'failed') {
     return <FailureIcon />;
   }
+  if (status === 'waiting') {
+    return <WaitingIcon />;
+  }
   if (status === 'running') {
     return <RunningIcon />;
   }
   return <PendingIcon />;
 }
 
-/** 运行状态 → 图标（运行级：任一 failure → 失败；running → 旋转）。 */
-export function RunStatusIcon({ status, summary }: { status: WorkflowRunStatus; summary: { conclusion: string } | null }) {
+/** 运行状态 → 图标（运行级：waiting 审批挂起；任一 failure → 失败；running → 旋转）。 */
+export function RunStatusIcon({
+  status,
+  summary,
+}: {
+  status: WorkflowRunStatus;
+  summary: { conclusion?: string } | WorkflowWaitingSummary | null;
+}) {
+  const conclusion = summary && !('status' in summary) ? summary.conclusion : undefined;
+  if (status === 'waiting') {
+    return <WaitingIcon size={18} />;
+  }
   if (status === 'running' || status === 'pending') {
     return status === 'running' ? <RunningIcon size={18} /> : <PendingIcon size={18} />;
   }
-  if (summary?.conclusion === 'success') {
+  if (conclusion === 'success') {
     return <SuccessIcon size={18} />;
   }
   return <FailureIcon size={18} />;
@@ -162,8 +190,8 @@ export function TriggerBadge({ trigger }: { trigger: 'submission' | 'manual' | '
 }
 
 /** 作业类型徽标（GitHub Actions 的 job 类型标识风格）。 */
-export function JobTypeBadge({ jobType }: { jobType: 'rules' | 'simulation' }) {
-  const isRules = jobType === 'rules';
+export function JobTypeBadge({ jobType }: { jobType: 'rules' | 'simulation' | 'approval' }) {
+  const label = jobType === 'rules' ? 'rules/check' : jobType === 'approval' ? 'approval/request' : 'simulation/run';
   return (
     <span
       style={{
@@ -177,7 +205,7 @@ export function JobTypeBadge({ jobType }: { jobType: 'rules' | 'simulation' }) {
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       }}
     >
-      {isRules ? 'rules/check' : 'simulation/run'}
+      {label}
     </span>
   );
 }

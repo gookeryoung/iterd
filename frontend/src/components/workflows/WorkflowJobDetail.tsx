@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { extractErrorMessage } from '../../api/client';
 import { fetchFindings } from '../../api/rules';
 import { fetchSimResult } from '../../api/simulation';
+import { fetchJobApprovals, fetchPendingApprovals } from '../../api/workflows';
 import {
   SEVERITY_LABELS,
   type Finding,
@@ -15,6 +16,7 @@ import {
 } from '../../types';
 import { formatDateTime } from '../../utils/format';
 import { FailureIcon, JobTypeBadge, JobStatusIcon, PRIMER_COLORS, StepStatusIcon } from './RunStatusIcon';
+import ApprovalPanel from './ApprovalPanel';
 
 /** 耗时计算（started_at → finished_at）。 */
 function durationText(job: WorkflowJob): string {
@@ -105,7 +107,8 @@ const findingColumns: ColumnsType<Finding> = [
     title: '产物',
     key: 'artifact',
     width: 170,
-    render: (_: unknown, r: Finding) => `${r.artifact_code}（v${r.version_no}）`,
+    render: (_: unknown, r: Finding) =>
+      r.artifact_code != null ? `${r.artifact_code}（v${r.version_no ?? '-'}）` : '迭代级',
   },
   { title: '位置', dataIndex: 'location', key: 'location', width: 120 },
   { title: '消息', dataIndex: 'message', key: 'message' },
@@ -160,6 +163,19 @@ export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDeta
     queryFn: () => fetchSimResult(job.sim_job_id as number),
     enabled: job.job_type === 'simulation' && job.sim_job_id !== null && job.status === 'succeeded',
   });
+  // 审批作业：签署记录 + 会签元数据（approvers/min_count/can_approve 来自待办汇总端点）
+  const approvalsQuery = useQuery({
+    queryKey: ['workflow-job-approvals', job.id],
+    queryFn: () => fetchJobApprovals(job.id),
+    enabled: job.job_type === 'approval',
+  });
+  const pendingMetaQuery = useQuery({
+    queryKey: ['approvals-pending'],
+    queryFn: () => fetchPendingApprovals(),
+    enabled: job.job_type === 'approval' && job.status === 'waiting',
+    refetchInterval: 5000,
+  });
+  const pendingMeta = (pendingMetaQuery.data ?? []).find((p) => p.job_id === job.id);
 
   const duration = durationText(job);
   const logs = job.logs ?? [];
@@ -203,6 +219,8 @@ export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDeta
               </>
             )}
           </span>
+        ) : job.job_type === 'approval' ? (
+          <span>会签审批作业：待指定签署人完成签署后，流水线自动续跑下游作业。</span>
         ) : (
           <span>
             仿真模板：<strong>{job.template_name || '-'}</strong>
@@ -223,6 +241,49 @@ export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDeta
           </span>
         )}
       </div>
+
+      {/* 会签审批面板（审批作业专属：进度 + 签署记录 + 签署入口） */}
+      {job.job_type === 'approval' && (
+        <div style={{ marginBottom: 12 }}>
+          {approvalsQuery.isError ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 12px',
+                borderRadius: 6,
+                background: PRIMER_COLORS.dangerBg,
+                border: '1px solid rgba(207, 34, 46, 0.4)',
+                color: PRIMER_COLORS.danger,
+                fontSize: 13,
+              }}
+            >
+              <FailureIcon size={14} />
+              <span>审批记录加载失败：{extractErrorMessage(approvalsQuery.error)}</span>
+            </div>
+          ) : (
+            <ApprovalPanel
+              jobId={job.id}
+              minCount={pendingMeta?.min_count ?? 1}
+              approvedCount={(approvalsQuery.data ?? []).filter((r) => r.decision === 'approved').length}
+              approvers={pendingMeta?.approvers ?? []}
+              approvals={(approvalsQuery.data ?? []).map((r) => ({
+                approver_name: r.approver_name,
+                decision: r.decision,
+                comment: r.comment,
+                created_at: r.created_at,
+              }))}
+              canApprove={pendingMeta?.can_approve ?? false}
+              waiting={job.status === 'waiting'}
+              onSigned={() => {
+                void pendingMetaQuery.refetch();
+                void approvalsQuery.refetch();
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {/* 步骤概要（平台内置执行环节，点击进入步骤日志） */}
       {job.steps.length > 0 && (
@@ -293,7 +354,7 @@ export default function WorkflowJobDetail({ job, onSelectStep }: WorkflowJobDeta
               key={f.id}
               level="error"
               message={`${f.rule_code} ${f.message}`}
-              location={`${f.artifact_code} v${f.version_no} · ${f.location}`}
+              location={`${f.artifact_code ?? '迭代级'}${f.version_no != null ? ` v${f.version_no}` : ''} · ${f.location}`}
             />
           ))}
           {errorFindings.length > 5 && (

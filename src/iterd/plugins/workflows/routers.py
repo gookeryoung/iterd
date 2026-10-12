@@ -260,3 +260,50 @@ async def get_submission(submission_id: int, user: CurrentUser, session: Session
     return await _fill_submission_out(
         session, schemas.SubmissionOut.model_validate(submission), submission_id=submission_id
     )
+
+
+# ---- 审批会签 ----
+
+
+async def _authorize_job_read(session: SessionDep, job_id: int, user: CurrentUser) -> Any:
+    """审批作业读权限：所属项目 viewer+；返回作业。"""
+    job = await services.get_approval_job(session, job_id)
+    run = await services.get_run(session, int(job.run_id))
+    iteration = await project_services.get_iteration(session, run.iteration_id)
+    await rbac.require_project_role(
+        session, iteration.project_id, user.id, "viewer", is_superuser=user.is_superuser, include_ancestor=True
+    )
+    return job
+
+
+@router.get("/approvals/pending", response_model=list[schemas.PendingApprovalOut])
+async def list_pending_approvals(
+    user: CurrentUser, session: SessionDep, project_id: int | None = None
+) -> list[schemas.PendingApprovalOut]:
+    """当前用户可见的待审批作业列表（waiting 态审批作业，跨运行汇总）。"""
+    items = await services.list_pending_approvals(session, user=user, project_id=project_id)
+    return [schemas.PendingApprovalOut.model_validate(item) for item in items]
+
+
+@router.get("/workflow-jobs/{job_id}/approvals", response_model=list[schemas.ApprovalRecordOut])
+async def list_job_approvals(job_id: int, user: CurrentUser, session: SessionDep) -> list[schemas.ApprovalRecordOut]:
+    """作业的审批记录（viewer+）。"""
+    job = await _authorize_job_read(session, job_id, user)
+    records = await services.job_approvals(session, job_id=int(job.id))
+    return [schemas.ApprovalRecordOut.model_validate(r) for r in records]
+
+
+@router.post("/workflow-jobs/{job_id}/approvals", response_model=schemas.ApprovalRecordOut, status_code=201)
+async def record_approval(
+    job_id: int, body: schemas.ApprovalIn, user: CurrentUser, session: SessionDep
+) -> schemas.ApprovalRecordOut:
+    """签署审批意见（reviewer+ 且在 approvers 范围内）；达成会签条件时同步恢复流水线续跑。"""
+    job = await _authorize_job_read(session, job_id, user)
+    run = await services.get_run(session, int(job.run_id))
+    iteration = await project_services.get_iteration(session, run.iteration_id)
+    await rbac.require_project_role(session, iteration.project_id, user.id, "reviewer", is_superuser=user.is_superuser)
+    record, _summary = await services.record_approval(
+        session, actor=user, job_id=job_id, decision=body.decision, comment=body.comment
+    )
+    await session.commit()
+    return schemas.ApprovalRecordOut.model_validate(record)

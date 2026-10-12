@@ -80,19 +80,19 @@ class CheckRunOut(BaseModel):
 
 
 class CheckFindingOut(BaseModel):
-    """发现项对外结构（规则与产物信息由服务层联表填充）。"""
+    """发现项对外结构（规则与产物信息由服务层联表填充；迭代级发现项产物信息为空）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     check_run_id: int
-    artifact_version_id: int
+    artifact_version_id: int | None
     rule_item_id: int
     severity: str
     location: str
     message: str
     rule_code: str = ""
     rule_name: str = ""
-    artifact_code: str = ""
-    artifact_name: str = ""
-    version_no: int = 0
+    artifact_code: str | None = None
+    artifact_name: str | None = None
+    version_no: int | None = None

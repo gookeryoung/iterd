@@ -9,8 +9,10 @@
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import type {
+  ApprovalEntry,
   AuditLog,
   CheckerInfo,
+  PendingApproval,
   Project,
   RuleItem,
   RuleSet,
@@ -94,6 +96,30 @@ export const mockAuditLog: AuditLog = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+/** 待审批作业 fixture（可签署）。 */
+export const mockPendingApproval: PendingApproval = {
+  job_id: 501,
+  run_id: 41,
+  workflow_code: 'CONV-REVIEW',
+  iteration_id: 1,
+  project_id: 10,
+  job_key: 'signoff',
+  job_name: '总装会签',
+  approvers: ['reviewer-a', 'reviewer-b'],
+  min_count: 2,
+  approved_count: 1,
+  approvals: [
+    {
+      approver_name: 'reviewer-a',
+      decision: 'approved',
+      comment: '图纸符合规范',
+      created_at: '2026-01-01T01:00:00Z',
+    },
+  ] as ApprovalEntry[],
+  can_approve: true,
+  created_at: '2026-01-01T00:30:00Z',
+}
+
 // ─────────────── 默认 handlers ───────────────
 
 export const handlers = [
@@ -150,9 +176,42 @@ export const handlers = [
 
   // 审查流水线
   http.get('/api/v1/workflows', () => HttpResponse.json([mockWorkflow])),
+  // 审批会签
+  http.get('/api/v1/approvals/pending', () => HttpResponse.json([mockPendingApproval])),
+  http.get('/api/v1/workflow-jobs/:id/approvals', () =>
+    HttpResponse.json([
+      {
+        id: 1,
+        job_id: 501,
+        run_id: 41,
+        approver_id: 2,
+        approver_name: 'reviewer-a',
+        decision: 'approved',
+        comment: '图纸符合规范',
+        created_at: '2026-01-01T01:00:00Z',
+      },
+    ])),
+  http.post('/api/v1/workflow-jobs/:id/approvals', () =>
+    HttpResponse.json(
+      {
+        id: 2,
+        job_id: 501,
+        run_id: 41,
+        approver_id: 1,
+        approver_name: 'admin',
+        decision: 'approved',
+        comment: '',
+        created_at: '2026-01-01T02:00:00Z',
+      },
+      { status: 201 },
+    )),
 
   // 审计日志
   http.get('/api/v1/audit-logs', () => HttpResponse.json([mockAuditLog])),
+
+  // 站内信通知
+  http.get('/api/v1/notifications', () => HttpResponse.json([])),
+  http.get('/api/v1/notifications/unread-count', () => HttpResponse.json({ count: 0 })),
 ]
 
 export const server = setupServer(...handlers)

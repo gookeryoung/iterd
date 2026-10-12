@@ -1,0 +1,23 @@
+# 审查模板种子数据。definition 为工作流 YAML 文本（GitHub Actions 语法子集：jobs/uses/needs/with）；
+# project_code 为 BOM-2026 表示项目级模板；runs 为 seed 预执行的运行绑定（project_code + iteration_number + workflow_code）。
+# 本数据集覆盖跨产物（context）检查器：rules/check 作业引用的规则集含 bom_consistency 与 iteration_completeness
+# 两类 context 规则（2 error / 1 warning），rules/check 编排自动按轨道分流，context 规则整迭代执行一次。
+templates:
+  - code: BOM-REVIEW
+    name: BOM 一致性边界审查流水线
+    project_code: BOM-2026
+    description: 静态规则检查（BOM 一致性边界检查集，含跨产物 context 检查器）；重量冲突与缺件判 error、计算书覆盖缺失判 warning
+    definition: |
+      name: BOM 一致性边界审查
+      description: 跨产物规则检查（BOM 一致性与计算书覆盖度）
+
+      jobs:
+        rules-check:
+          name: 静态规则检查
+          uses: rules/check
+          with:
+            rule_set: BOM 一致性边界检查集
+runs:
+  - project_code: BOM-2026
+    iteration_number: 1
+    workflow_code: BOM-REVIEW

@@ -1,0 +1,34 @@
+{
+  "_comment": "多角色协作通知演练 —— 演示站内信事件触达：迭代2 违规件触发 error 发现、运行失败，触发者收到 run.completed 通知；迭代1 合规件全绿后进入会签，reviewer 成员收到 approval.pending 待办通知，范围外 designer 不产生任何通知。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致。",
+  "project": {
+    "code": "NTX-2026",
+    "name": "多角色协作通知演练",
+    "description": "两个迭代分别演示检查失败通知与会签待办通知：设计（designer）、校核（reviewer）与超管（admin）三类角色的事件触达范围。",
+    "status": "active"
+  },
+  "sub_projects": [],
+  "members": [
+    { "username": "designer", "project_code": "NTX-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "NTX-2026", "role": "reviewer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "NTX-2026",
+      "title": "合规件会签演练",
+      "objective": "合规件静态检查全绿后进入人工会签，产生审批待办通知（reviewer 可签）",
+      "start_date": "2026-09-01",
+      "end_date": "2026-10-31",
+      "status": "active"
+    },
+    {
+      "number": 2,
+      "project_code": "NTX-2026",
+      "title": "违规件检查失败演练",
+      "objective": "违规件文件名与元数据不合规，检查运行失败并通知运行触发者",
+      "start_date": "2026-10-01",
+      "end_date": "2026-11-30",
+      "status": "active"
+    }
+  ]
+}

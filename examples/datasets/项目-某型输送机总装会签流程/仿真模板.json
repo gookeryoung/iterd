@@ -1,0 +1,25 @@
+{
+  "_comment": "仿真模板种子数据。solver_type 取自 GET /api/v1/solvers；thresholds 形如 {指标: {min|max}}。纵梁 FRM-05：矩形截面 50x100（宽x高），跨距 6000mm，Q235B；额定载荷 6000N 时 max_stress=108MPa、deflection≈0.31mm、安全系数≈2.18，三项均满足阈值，会签通过后仿真结论 pass。",
+  "templates": [
+    {
+      "code": "BEAM-ASM-CHECK",
+      "name": "纵梁静强度校核（总装会签后）",
+      "solver_type": "beam_static",
+      "project_code": "CVZ-2026",
+      "description": "额定载荷 6000N：max_stress=108MPa、deflection≈0.31mm、n≈2.18，三项均满足阈值，结论 pass",
+      "params": {
+        "load": 6000,
+        "length": 6000,
+        "width": 50,
+        "height": 100,
+        "modulus": 206000,
+        "yield_strength": 235
+      },
+      "thresholds": {
+        "max_stress": { "max": 160 },
+        "deflection": { "max": 15 },
+        "safety_factor": { "min": 1.5 }
+      }
+    }
+  ]
+}

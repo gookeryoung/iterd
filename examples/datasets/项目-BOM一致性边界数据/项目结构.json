@@ -1,0 +1,24 @@
+{
+  "_comment": "某型输送机BOM一致性边界数据 —— 跨产物（context）检查器演示数据集。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致，供 scripts/load_example.py 一键载入演示。BOM 零件经 part_code 元数据与产物关联：FRM-01/FRM-03 重量一致、FRM-02 重量冲突（偏差 12.6% 超 5% 容忍）、STD-01 缺件（无对应产物）；计算书 CAL-701 经 covers 元数据覆盖 DRW-701/MOD-701，DRW-702 无覆盖。",
+  "project": {
+    "code": "BOM-2026",
+    "name": "某型输送机BOM一致性边界数据",
+    "description": "BOM 零件与产物元数据一致性校验（bom_consistency）与计算书覆盖度校验（iteration_completeness）两类跨产物检查器的正反例与边界场景：重量一致 / 重量冲突 / 缺件 / 覆盖完整 / 覆盖缺失。",
+    "status": "active"
+  },
+  "members": [
+    { "username": "designer", "project_code": "BOM-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "BOM-2026", "role": "reviewer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "BOM-2026",
+      "title": "机架 BOM 一致性边界验证",
+      "objective": "验证 BOM 一致性与计算书覆盖度两类跨产物检查器的正反例判定",
+      "start_date": "2026-10-01",
+      "end_date": "2026-11-30",
+      "status": "active"
+    }
+  ]
+}

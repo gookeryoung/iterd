@@ -15,16 +15,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from iterd.models import Base, TimestampMixin
 
-JOB_TYPES = ("rules", "simulation")
-JOB_STATUSES = ("pending", "running", "succeeded", "failed", "skipped")
+JOB_TYPES = ("rules", "simulation", "approval")
+JOB_STATUSES = ("pending", "running", "waiting", "succeeded", "failed", "skipped")
 CONCLUSIONS = ("success", "failure", "skipped")
-RUN_STATUSES = ("pending", "running", "succeeded", "failed")
+RUN_STATUSES = ("pending", "running", "waiting", "succeeded", "failed")
 STEP_STATUSES = ("pending", "running", "succeeded", "failed", "skipped")
 TRIGGERS = ("submission", "manual", "rerun")
+# 审批决定枚举
+APPROVAL_DECISIONS = ("approved", "rejected")
 # 平台内置步骤序列：job_type → ((step_key, 步骤名), ...)（作业创建时同步生成）
 JOB_STEP_SEQUENCES: dict[str, tuple[tuple[str, str], ...]] = {
     "rules": (("setup", "解析配置"), ("check", "执行规则检查"), ("report", "判定结论")),
     "simulation": (("setup", "解析配置"), ("solve", "执行仿真"), ("evaluate", "阈值判定")),
+    "approval": (("setup", "解析审批配置"), ("collect", "收集审批意见"), ("decide", "审批判定")),
 }
 
 
@@ -122,7 +125,23 @@ class WorkflowJobStep(Base, TimestampMixin):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class ApprovalRecord(Base, TimestampMixin):
+    """审批记录：审批作业的一次决定（通过 / 驳回；同一作业同一审批人仅一条）."""
+
+    __tablename__ = "approval_records"
+    __table_args__ = (UniqueConstraint("job_id", "approver_id", name="uq_approval_job_approver"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("workflow_jobs.id"), index=True, nullable=False)
+    run_id: Mapped[int] = mapped_column(ForeignKey("workflow_runs.id"), index=True, nullable=False)
+    approver_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    approver_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+
+
 __all__ = [
+    "APPROVAL_DECISIONS",
     "CONCLUSIONS",
     "JOB_STATUSES",
     "JOB_STEP_SEQUENCES",
@@ -130,6 +149,7 @@ __all__ = [
     "RUN_STATUSES",
     "STEP_STATUSES",
     "TRIGGERS",
+    "ApprovalRecord",
     "IterationSubmission",
     "WorkflowJob",
     "WorkflowJobStep",
