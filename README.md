@@ -91,6 +91,7 @@ iterd serve
 ## 文档
 
 - [数据目录结构说明](docs/data-directory.md)：`~/.iterd` 数据根目录与子目录职责、权限与维护要求
+- [单机部署与运维手册](docs/deployment.md)：部署步骤、配置项、SQLite 并发参数、备份策略与运维清单
 - [备份还原操作手册](docs/backup-restore.md)：备份策略、`iterd backup` / `iterd restore` 操作与异常处理
 
 文档由 Sphinx 构建，托管在 ReadTheDocs：

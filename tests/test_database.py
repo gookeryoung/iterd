@@ -56,7 +56,7 @@ def test_concurrent_writers_no_lock_failure(isolated_db: Path) -> None:
     async def _writer(writer: int, rows: int = 10) -> None:
         factory = get_session_factory(engine)
         async with factory() as session:
-            for i in range(rows):
+            for _i in range(rows):
                 await session.execute(text("INSERT INTO t (writer) VALUES (:w)"), {"w": writer})
                 await session.commit()
                 await asyncio.sleep(0)  # 主动让出，制造并发竞争窗口

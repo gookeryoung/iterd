@@ -188,11 +188,7 @@ def _object_relpaths_in_archive(archive: Path) -> set[str]:
     """枚举归档内对象成员的相对路径（backup/objects/ 下），供增量备份跳过未变对象."""
     with tarfile.open(archive, "r:gz") as tar:
         prefix = f"backup/{_OBJECTS_DIR_NAME}/"
-        return {
-            m.name.removeprefix(prefix)
-            for m in tar.getmembers()
-            if m.isfile() and m.name.startswith(prefix)
-        }
+        return {m.name.removeprefix(prefix) for m in tar.getmembers() if m.isfile() and m.name.startswith(prefix)}
 
 
 def _make_tar_archive(source_dir: Path, output_path: Path) -> None:
@@ -225,7 +221,7 @@ def _ensure_backup_dir(target: Path) -> Path:
         return fallback
 
 
-def create_backup(
+def create_backup(  # noqa: PLR0913 - 备份参数
     output: Path | None = None,
     *,
     include_objects: bool = True,
@@ -296,7 +292,9 @@ def create_backup(
                     raise BackupError(f"增量备份基线归档不存在: {base}")
                 base_manifest = inspect_backup(base)
                 if str(base_manifest["objects"].get("base", "")):
-                    raise BackupError(f"增量备份基线须为全量归档（增量归档不含被跳过的对象，链式基线会导致还原缺对象）: {base}")
+                    raise BackupError(
+                        f"增量备份基线须为全量归档（增量归档不含被跳过的对象，链式基线会导致还原缺对象）: {base}"
+                    )
                 skip = _object_relpaths_in_archive(base)
             manifest.objects = _collect_objects(obj_dir, temp_root, skip=skip)
             if base is not None:
@@ -411,6 +409,26 @@ def _restore_sqlite(extracted_dir: Path, target_db_path: Path) -> None:
         src_conn.close()
 
 
+def _validate_incremental_base(manifest: dict[str, Any], base: Path | None) -> None:
+    """增量归档还原前校验基线：必须提供、须为全量归档且文件名与 manifest 记录一致.
+
+    Raises:
+        RestoreError: 基线缺失、基线为增量归档或文件名与 manifest 记录不匹配.
+    """
+    objects_base_name = str(manifest["objects"].get("base", ""))
+    if not objects_base_name:
+        return
+    if base is None:
+        raise RestoreError(
+            f"增量备份还原需提供基线归档（manifest 记录基线: {objects_base_name}），请通过 base 参数传入"
+        )
+    base_manifest = inspect_backup(base)
+    if str(base_manifest["objects"].get("base", "")):
+        raise RestoreError(f"基线归档须为全量归档（增量归档不含被跳过的对象）: {base}")
+    if base.name != objects_base_name:
+        raise RestoreError(f"基线归档不匹配: manifest 记录 {objects_base_name}，实际传入 {base.name}")
+
+
 def restore_backup(
     archive: Path,
     *,
@@ -453,17 +471,9 @@ def restore_backup(
         raise RestoreError(f"还原目标仅支持 SQLite，当前 database_url: {db_url}")
 
     tar, manifest = _read_manifest(archive)
+    if include_objects:
+        _validate_incremental_base(manifest, base)
     objects_base_name = str(manifest["objects"].get("base", ""))
-    if objects_base_name and include_objects:
-        if base is None:
-            raise RestoreError(
-                f"增量备份还原需提供基线归档（manifest 记录基线: {objects_base_name}），请通过 base 参数传入"
-            )
-        base_manifest = inspect_backup(base)
-        if str(base_manifest["objects"].get("base", "")):
-            raise RestoreError(f"基线归档须为全量归档（增量归档不含被跳过的对象）: {base}")
-        if base.name != objects_base_name:
-            raise RestoreError(f"基线归档不匹配: manifest 记录 {objects_base_name}，实际传入 {base.name}")
 
     temp_root = Path(tempfile.mkdtemp(prefix="iterd-restore-", dir=_ensure_tmp_dir(settings)))
     base_root: Path | None = None

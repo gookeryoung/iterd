@@ -92,18 +92,24 @@ async def trace_graph(
         return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
     join_cond, next_col = _DIRECTIONS[direction]
-    nodes_sql = text(_WALK_CTE.format(next_col=next_col, join_cond=join_cond) + """
+    nodes_sql = text(
+        _WALK_CTE.format(next_col=next_col, join_cond=join_cond)
+        + """
         SELECT DISTINCT n.urn, n.node_type, n.display_name FROM walk
         JOIN trace_nodes n ON n.urn = walk.urn
-    """)
+    """
+    )
     rows = (await session.execute(nodes_sql, {"root": urn})).all()
     nodes = [{"urn": r[0], "node_type": r[1], "display_name": r[2]} for r in rows]
     # 边查询同样限定在 walk 可达集合内，避免全表边加载（大规模数据下的性能瓶颈）
-    edges_sql = text(_WALK_CTE.format(next_col=next_col, join_cond=join_cond) + """
+    edges_sql = text(
+        _WALK_CTE.format(next_col=next_col, join_cond=join_cond)
+        + """
         SELECT DISTINCT l.src_urn, l.dst_urn, l.link_type FROM trace_links l
         JOIN walk a ON a.urn = l.src_urn
         JOIN walk b ON b.urn = l.dst_urn
-    """)
+    """
+    )
     edge_rows = (await session.execute(edges_sql, {"root": urn})).all()
     edges = [{"src": e[0], "dst": e[1], "type": e[2]} for e in edge_rows]
     return {"nodes": nodes, "edges": edges}

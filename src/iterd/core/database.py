@@ -36,7 +36,7 @@ def _apply_sqlite_pragmas(dbapi_connection: Any, busy_timeout_ms: int) -> None:
     busy_timeout 让被锁阻塞的写操作等待重试而非立即报 database is locked。
     兼容 aiosqlite（async 适配器）与同步 sqlite3 两种连接形态。
     """
-    pragmas = (f"PRAGMA journal_mode=WAL", f"PRAGMA busy_timeout={busy_timeout_ms}")
+    pragmas = ("PRAGMA journal_mode=WAL", f"PRAGMA busy_timeout={busy_timeout_ms}")
     if hasattr(dbapi_connection, "await_"):
         for pragma in pragmas:
             cursor = dbapi_connection.execute(pragma)
@@ -58,11 +58,11 @@ def get_engine(database_url: str, *, sqlite_busy_timeout_ms: int = 5000) -> Asyn
             kwargs["connect_args"] = {"timeout": 30}
             _ensure_sqlite_parent_dir(database_url)
             _engine = create_async_engine(database_url, **kwargs)  # pyright: ignore[reportArgumentType]
-            event.listen(
-                _engine.sync_engine,
-                "connect",
-                lambda dbapi_conn, _record: _apply_sqlite_pragmas(dbapi_conn, sqlite_busy_timeout_ms),
-            )
+
+            def _on_connect(dbapi_conn: Any, _record: Any) -> None:
+                _apply_sqlite_pragmas(dbapi_conn, sqlite_busy_timeout_ms)
+
+            event.listen(_engine.sync_engine, "connect", _on_connect)
             return _engine
         _engine = create_async_engine(database_url, **kwargs)  # pyright: ignore[reportArgumentType]
     return _engine
@@ -88,6 +88,8 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     from iterd.core.config import get_settings
 
     settings = get_settings()
-    factory = get_session_factory(get_engine(settings.database_url, sqlite_busy_timeout_ms=settings.sqlite_busy_timeout_ms))
+    factory = get_session_factory(
+        get_engine(settings.database_url, sqlite_busy_timeout_ms=settings.sqlite_busy_timeout_ms)
+    )
     async with factory() as session:
         yield session

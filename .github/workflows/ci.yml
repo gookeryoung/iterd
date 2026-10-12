@@ -101,8 +101,6 @@ jobs:
     name: Frontend E2E
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # 观察期：E2E 允许失败不阻断合并，稳定后移除 continue-on-error
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
 

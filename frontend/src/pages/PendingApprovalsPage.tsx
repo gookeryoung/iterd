@@ -15,6 +15,8 @@ function PendingApprovalCard({ item }: { item: PendingApproval }) {
 
   return (
     <div
+      data-testid="pending-approval-card"
+      data-workflow={item.workflow_code}
       style={{
         border: '1px solid #d0d7de',
         borderRadius: 6,
