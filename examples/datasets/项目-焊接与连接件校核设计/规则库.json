@@ -1,0 +1,45 @@
+{
+  "_comment": "连接件校核规则库种子数据。checker_type 取值须为 GET /api/v1/checkers 已注册检查器；本数据集产物命名与元数据齐全，静态检查全绿，流水线得以推进至四项仿真。",
+  "rules": [
+    {
+      "code": "DRAFT-501",
+      "name": "图纸文件名规范（连接件）",
+      "category": "drafting",
+      "checker_type": "filename_convention",
+      "params": { "pattern": "^[A-Z0-9-]+_rev[A-Z]\\.\\w+$" },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "连接件图样产物文件名须形如 CODE_revX.ext"
+    },
+    {
+      "code": "MATL-501",
+      "name": "材料元数据必填（连接件）",
+      "category": "material",
+      "checker_type": "metadata_required",
+      "params": { "required": { "材料": "str", "尺寸": "str" } },
+      "severity_default": "error",
+      "enabled": true,
+      "description": "上传版本时须登记材料牌号与关键尺寸"
+    },
+    {
+      "code": "TOL-501",
+      "name": "公差与粗糙度登记（连接件）",
+      "category": "tolerance",
+      "checker_type": "metadata_required",
+      "params": { "required": { "公差": "str", "粗糙度": "str" } },
+      "severity_default": "warning",
+      "enabled": true,
+      "description": "关键配合面须标注公差等级与表面粗糙度"
+    },
+    {
+      "code": "PROC-501",
+      "name": "设计校核会签（连接件）",
+      "category": "process",
+      "checker_type": "metadata_required",
+      "params": { "required": { "设计者": "str", "校核者": "str" } },
+      "severity_default": "info",
+      "enabled": true,
+      "description": "校核前应完成设计者与校核者双签登记"
+    }
+  ]
+}

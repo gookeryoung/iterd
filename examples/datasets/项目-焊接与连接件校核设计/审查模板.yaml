@@ -1,0 +1,51 @@
+# 审查模板种子数据。definition 为工作流 YAML 文本（GitHub Actions 语法子集：jobs/uses/needs/with）；
+# runs 为 seed 预执行的运行绑定（project_code + iteration_number + workflow_code）。
+# 本数据集演示连接件求解器族：静态检查全绿后并行执行四项仿真；
+# 仿真判定 fail 仅落红 X 于该作业 conclusion（status 仍 succeeded），不阻断兄弟作业与运行推进。
+templates:
+  - code: CONN-CHECK
+    name: 连接件校核流水线
+    project_code: WLD-2026
+    description: 静态规则检查通过后并行执行角焊缝 / 螺栓 / 齿轮四项强度校核（两项通过、两项超阈演示）
+    definition: |
+      name: 焊接与连接件校核
+      description: 静态规则检查通过后并行执行四项连接件强度仿真
+
+      jobs:
+        rules-check:
+          name: 静态规则检查
+          uses: rules/check
+          with:
+            rule_set: 连接件校核检查集
+        wld-sim:
+          name: 焊接支架角焊缝校核
+          needs: rules-check
+          uses: simulation/run
+          with:
+            template: WLD-PASS
+            artifact: WLD-501
+        blt-sim:
+          name: 螺栓法兰剪切校核
+          needs: rules-check
+          uses: simulation/run
+          with:
+            template: BLT-OVERLOAD
+            artifact: BLT-501
+        gear-sim:
+          name: 齿轮轴齿根弯曲校核
+          needs: rules-check
+          uses: simulation/run
+          with:
+            template: GEAR-PASS
+            artifact: GR-501
+        wld-thin-sim:
+          name: 支架角焊缝过薄校核
+          needs: rules-check
+          uses: simulation/run
+          with:
+            template: WLD-THIN
+            artifact: WLD-501
+runs:
+  - project_code: WLD-2026
+    iteration_number: 1
+    workflow_code: CONN-CHECK

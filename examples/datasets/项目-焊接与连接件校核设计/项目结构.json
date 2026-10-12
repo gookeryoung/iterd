@@ -1,0 +1,25 @@
+{
+  "_comment": "焊接与连接件校核设计 —— 演示三个连接件求解器（角焊缝剪切 / 螺栓组剪切 / 齿轮齿根弯曲）与超阈判定的确定性数据集：静态规则检查全绿后并行执行四项仿真，两项通过、两项超阈失败（螺栓过载 / 焊脚过薄），覆盖仿真 verdict 的 pass 与 fail 两条路径。字段与 POST /api/v1/projects、/projects/{id}/iterations 入参一致。",
+  "project": {
+    "code": "WLD-2026",
+    "name": "焊接与连接件校核设计",
+    "description": "焊接支架、螺栓法兰与齿轮轴连接件校核，演示连接件求解器族与仿真超阈判定链路。",
+    "status": "active"
+  },
+  "sub_projects": [],
+  "members": [
+    { "username": "designer", "project_code": "WLD-2026", "role": "designer" },
+    { "username": "reviewer", "project_code": "WLD-2026", "role": "reviewer" }
+  ],
+  "iterations": [
+    {
+      "number": 1,
+      "project_code": "WLD-2026",
+      "title": "连接件校核初版",
+      "objective": "完成焊接支架、螺栓法兰、齿轮轴图纸与布置图，静态检查通过后并行执行角焊缝 / 螺栓 / 齿轮四项强度校核",
+      "start_date": "2026-09-01",
+      "end_date": "2026-12-31",
+      "status": "active"
+    }
+  ]
+}

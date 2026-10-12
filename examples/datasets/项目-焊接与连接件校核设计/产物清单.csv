@@ -1,0 +1,5 @@
+﻿产物编码,产物名称,类别,项目编码,迭代序号,文件名,备注
+WLD-501,焊接支架图,drawing,WLD-2026,1,WLD-501_revA.dxf,角焊缝校核绑定产物
+BLT-501,螺栓连接法兰图,drawing,WLD-2026,1,BLT-501_revA.dxf,螺栓组剪切校核绑定产物
+GR-501,齿轮轴零件图,drawing,WLD-2026,1,GR-501_revA.dxf,齿根弯曲校核绑定产物
+DRW-501,连接件布置图,drawing,WLD-2026,1,DRW-501_revA.dxf,连接件总体布置

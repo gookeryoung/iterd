@@ -1,0 +1,77 @@
+{
+  "_comment": "仿真模板种子数据（连接件求解器族）。solver_type 取自 GET /api/v1/solvers；thresholds 形如 {指标: {min|max}}。WLD-PASS：10000N / 焊脚6 / 焊缝200 单侧，τ≈11.905MPa、n≈6.72，pass。BLT-OVERLOAD：100kN / M10x4 单剪切面，τ≈318.31MPa 超阈、n≈0.25，fail（螺栓过载演示）。GEAR-PASS：2000N / m3 / z24 / b30，σ≈191.571MPa（阈 220）、n≈1.04（阈 1.0），pass。WLD-THIN：30000N / 焊脚3 / 焊缝150 单侧，τ≈95.238MPa 超阈、n≈0.84，fail（焊脚过薄演示）。",
+  "templates": [
+    {
+      "code": "WLD-PASS",
+      "name": "焊接支架角焊缝校核（通过）",
+      "solver_type": "weld_fillet_shear",
+      "project_code": "WLD-2026",
+      "description": "10000N / 焊脚6mm / 焊缝200mm 单侧受力：τ≈11.905MPa（阈 80）、n≈6.72（阈 1.5），结论 pass",
+      "params": {
+        "shear_force": 10000,
+        "weld_leg": 6,
+        "weld_length": 200,
+        "sides": 1,
+        "allowable_shear": 80
+      },
+      "thresholds": {
+        "shear_stress": { "max": 80 },
+        "safety_factor": { "min": 1.5 }
+      }
+    },
+    {
+      "code": "BLT-OVERLOAD",
+      "name": "螺栓法兰剪切校核（过载演示）",
+      "solver_type": "bolt_shear",
+      "project_code": "WLD-2026",
+      "description": "100000N / M10 / 4 栓 / 单剪切面：τ≈318.31MPa 远超许用 80MPa、n≈0.25，结论 fail",
+      "params": {
+        "shear_force": 100000,
+        "bolt_diameter": 10,
+        "count": 4,
+        "planes": 1,
+        "allowable_shear": 80
+      },
+      "thresholds": {
+        "shear_stress": { "max": 80 },
+        "safety_factor": { "min": 1.5 }
+      }
+    },
+    {
+      "code": "GEAR-PASS",
+      "name": "齿轮轴齿根弯曲校核（通过）",
+      "solver_type": "gear_tooth_bending",
+      "project_code": "WLD-2026",
+      "description": "切向力 2000N / 模数3 / 齿数24 / 齿宽30：σ≈191.571MPa（阈 220）、n≈1.04（阈 1.0），结论 pass",
+      "params": {
+        "tangential_force": 2000,
+        "module": 3,
+        "teeth": 24,
+        "face_width": 30,
+        "allowable_bending": 200
+      },
+      "thresholds": {
+        "bending_stress": { "max": 220 },
+        "safety_factor": { "min": 1.0 }
+      }
+    },
+    {
+      "code": "WLD-THIN",
+      "name": "支架角焊缝校核（焊脚过薄演示）",
+      "solver_type": "weld_fillet_shear",
+      "project_code": "WLD-2026",
+      "description": "30000N / 焊脚3mm / 焊缝150mm 单侧受力：τ≈95.238MPa 超许用 80MPa、n≈0.84，结论 fail",
+      "params": {
+        "shear_force": 30000,
+        "weld_leg": 3,
+        "weld_length": 150,
+        "sides": 1,
+        "allowable_shear": 80
+      },
+      "thresholds": {
+        "shear_stress": { "max": 80 },
+        "safety_factor": { "min": 1.5 }
+      }
+    }
+  ]
+}

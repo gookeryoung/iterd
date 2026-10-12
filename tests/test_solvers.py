@@ -17,7 +17,14 @@ def _run(solver_type: str, **inputs: float) -> dict[str, float]:
 
 
 def test_registry_and_manifest() -> None:
-    assert set(registered_solvers()) == {"beam_static", "column_buckling", "shaft_torsion"}
+    assert set(registered_solvers()) == {
+        "beam_static",
+        "bolt_shear",
+        "column_buckling",
+        "gear_tooth_bending",
+        "shaft_torsion",
+        "weld_fillet_shear",
+    }
     manifest = solver_manifest()
     assert {item["solver_type"] for item in manifest} == set(registered_solvers())
     for item in manifest:
@@ -116,6 +123,94 @@ def test_shaft_torsion() -> None:
     overload = _run("shaft_torsion", torque=1500, diameter=45, length=500, shear_modulus=79000, allowable_shear=60)
     assert overload["max_shear_stress"] == pytest.approx(metrics["max_shear_stress"] * 1.875, rel=1e-4)
     assert overload["twist_angle"] == pytest.approx(metrics["twist_angle"] * 1.875, rel=1e-4)
+
+
+def test_weld_fillet_shear() -> None:
+    metrics = _run(
+        "weld_fillet_shear",
+        shear_force=10000,
+        weld_leg=6,
+        weld_length=200,
+        sides=1,
+        allowable_shear=80,
+    )
+    # throat=0.7h=4.2mm，A=4.2*200=840mm²，τ=10000/840≈11.9048MPa
+    assert metrics["throat_size"] == pytest.approx(4.2, rel=1e-6)
+    assert metrics["shear_stress"] == pytest.approx(11.9048, rel=1e-4)
+    assert metrics["safety_factor"] == pytest.approx(80 / 11.9048, rel=1e-4)
+
+    # 双侧角焊缝：承载面积翻倍，应力减半
+    double = _run("weld_fillet_shear", shear_force=10000, weld_leg=6, weld_length=200, sides=2, allowable_shear=80)
+    assert double["shear_stress"] == pytest.approx(metrics["shear_stress"] / 2, rel=1e-6)
+    assert double["safety_factor"] == pytest.approx(metrics["safety_factor"] * 2, rel=1e-6)
+
+
+def test_bolt_shear() -> None:
+    metrics = _run("bolt_shear", shear_force=10000, bolt_diameter=10, count=4, planes=1, allowable_shear=80)
+    # τ=4F/(n·planes·π·d²)=40000/(400π)≈31.8310MPa
+    assert metrics["single_shear_area"] == pytest.approx(25 * math.pi, rel=1e-6)
+    assert metrics["shear_stress"] == pytest.approx(31.8310, rel=1e-4)
+    assert metrics["safety_factor"] == pytest.approx(80 / 31.8310, rel=1e-4)
+
+    # 双剪切面：应力减半；螺栓数加倍：应力减半
+    two_planes = _run("bolt_shear", shear_force=10000, bolt_diameter=10, count=4, planes=2, allowable_shear=80)
+    assert two_planes["shear_stress"] == pytest.approx(metrics["shear_stress"] / 2, rel=1e-6)
+    eight_bolts = _run("bolt_shear", shear_force=10000, bolt_diameter=10, count=8, planes=1, allowable_shear=80)
+    assert eight_bolts["shear_stress"] == pytest.approx(metrics["shear_stress"] / 2, rel=1e-6)
+
+
+def test_gear_tooth_bending() -> None:
+    metrics = _run(
+        "gear_tooth_bending",
+        tangential_force=2000,
+        module=3,
+        teeth=24,
+        face_width=30,
+        allowable_bending=200,
+    )
+    # Y=0.154−0.912/24=0.116，σ=2000/(30*3*0.116)≈191.5709MPa
+    assert metrics["form_factor"] == pytest.approx(0.116, rel=1e-6)
+    assert metrics["bending_stress"] == pytest.approx(191.5709, rel=1e-4)
+    assert metrics["safety_factor"] == pytest.approx(200 / 191.5709, rel=1e-4)
+
+    # 齿数减小：Y 减小，应力升高
+    fewer = _run("gear_tooth_bending", tangential_force=2000, module=3, teeth=12, face_width=30, allowable_bending=200)
+    assert fewer["form_factor"] == pytest.approx(0.154 - 0.912 / 12, rel=1e-6)
+    assert fewer["bending_stress"] == pytest.approx(2000 / (30 * 3 * (0.154 - 0.912 / 12)), rel=1e-6)
+
+
+def test_weld_bolt_gear_param_validation() -> None:
+    # 角焊缝：侧数非正整数抛错（0 由正数校验拦截，1.5 由整数校验拦截）
+    weld = get_solver("weld_fillet_shear")
+    for bad_sides in (0, 1.5, "two"):
+        with pytest.raises(IterdError) as exc:
+            weld.run(SimInput(job_id=1, inputs={"sides": bad_sides}))
+        assert exc.value.code == "ITERD-SOLVER_ERROR"
+
+    # 螺栓：个数 / 剪切面数须为不小于 1 的整数
+    bolt = get_solver("bolt_shear")
+    for key in ("count", "planes"):
+        with pytest.raises(IterdError) as exc:
+            bolt.run(SimInput(job_id=1, inputs={key: 2.5}))
+        assert exc.value.code == "ITERD-SOLVER_ERROR"
+
+    # 齿轮：齿数过小导致齿形系数非正（Y=0.154−0.912/z，z<6 时 Y<0）
+    gear = get_solver("gear_tooth_bending")
+    with pytest.raises(IterdError) as exc:
+        gear.run(SimInput(job_id=1, inputs={"teeth": 4}))
+    assert exc.value.code == "ITERD-SOLVER_ERROR"
+
+
+@pytest.mark.parametrize("solver_type", ["weld_fillet_shear", "bolt_shear", "gear_tooth_bending"])
+def test_new_solver_zero_and_text_validation(solver_type: str) -> None:
+    spec = get_solver(solver_type).input_spec()[0]
+    key = str(spec["key"])
+    with pytest.raises(IterdError) as zero:
+        get_solver(solver_type).run(SimInput(job_id=1, inputs={key: 0}))
+    assert zero.value.code == "ITERD-SOLVER_ERROR"
+    with pytest.raises(IterdError) as text:
+        get_solver(solver_type).run(SimInput(job_id=1, inputs={key: "abc"}))
+    assert text.value.code == "ITERD-SOLVER_ERROR"
 
 
 @pytest.mark.parametrize("solver_type", ["beam_static", "column_buckling", "shaft_torsion"])

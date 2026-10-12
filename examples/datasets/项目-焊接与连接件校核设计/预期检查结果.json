@@ -1,0 +1,43 @@
+{
+  "_comment": "示例数据预期结果：seed 预执行后 rules/check 作业 CheckRun.summary 应与 expected_summary 一致（全绿无发现项）；四项仿真并行执行，WLD-PASS / GEAR-PASS verdict 为 pass，BLT-OVERLOAD（螺栓过载）与 WLD-THIN（焊脚过薄）verdict 为 fail 且 shear_stress、safety_factor 双双超阈。",
+  "iteration": { "project_code": "WLD-2026", "number": 1 },
+  "rule_set": "连接件校核检查集",
+  "expected_summary": {
+    "error": 0,
+    "warning": 0,
+    "info": 0,
+    "artifacts": 4,
+    "rules": 4
+  },
+  "expected_findings": [],
+  "expected_simulations": [
+    {
+      "template_code": "WLD-PASS",
+      "bind_artifact_code": "WLD-501",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "throat_size": 4.2, "shear_stress": "≈11.905", "safety_factor": "≈6.72" }
+    },
+    {
+      "template_code": "BLT-OVERLOAD",
+      "bind_artifact_code": "BLT-501",
+      "verdict": "fail",
+      "failed_keys": ["safety_factor", "shear_stress"],
+      "metrics_hint": { "single_shear_area": "≈78.54", "shear_stress": "≈318.31", "safety_factor": "≈0.25" }
+    },
+    {
+      "template_code": "GEAR-PASS",
+      "bind_artifact_code": "GR-501",
+      "verdict": "pass",
+      "failed_keys": [],
+      "metrics_hint": { "form_factor": "≈0.116", "bending_stress": "≈191.57", "safety_factor": "≈1.04" }
+    },
+    {
+      "template_code": "WLD-THIN",
+      "bind_artifact_code": "WLD-501",
+      "verdict": "fail",
+      "failed_keys": ["safety_factor", "shear_stress"],
+      "metrics_hint": { "throat_size": 2.1, "shear_stress": "≈95.238", "safety_factor": "≈0.84" }
+    }
+  ]
+}

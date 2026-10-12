@@ -1,0 +1,11 @@
+{
+  "_comment": "规则集种子数据。rule_codes 引用 规则库.json 中的 code；规则集经审查模板 rules/check 作业的 with.rule_set 引用生效。",
+  "rule_sets": [
+    {
+      "name": "连接件校核检查集",
+      "project_code": null,
+      "description": "全局规则集：连接件图样的命名、材料、公差与工艺会签登记四类检查",
+      "rule_codes": ["DRAFT-501", "MATL-501", "TOL-501", "PROC-501"]
+    }
+  ]
+}
