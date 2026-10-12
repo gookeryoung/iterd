@@ -80,18 +80,25 @@ def test_iteration_endpoints(client: TestClient, project: dict[str, Any], iterat
     assert client.get("/api/v1/baselines/99999").status_code == 404
 
 
-def test_rules_crud_and_rule_sets(client: TestClient, project: dict[str, Any], iteration: dict[str, Any]) -> None:
-    rule = client.post(
+def test_rules_crud_and_rule_sets(spa_client: TestClient) -> None:
+    """规则与规则集 CRUD，含已移除端点守卫（SPA 挂载下 POST 落到 StaticFiles 返回 405）."""
+    project = spa_client.post("/api/v1/projects", json={"code": "CV", "name": "覆盖项目"})
+    assert project.status_code == 201, project.text
+    created = spa_client.post(f"/api/v1/projects/{project.json()['id']}/iterations", json={"title": "迭代"})
+    assert created.status_code == 201, created.text
+    iid = created.json()["id"]
+
+    rule = spa_client.post(
         "/api/v1/rules",
         json={"code": "R-1", "name": "规则一", "category": "drafting", "checker_type": "filename_convention"},
     )
     assert rule.status_code == 201, rule.text
-    dup = client.post(
+    dup = spa_client.post(
         "/api/v1/rules",
         json={"code": "R-1", "name": "重复", "category": "drafting", "checker_type": "filename_convention"},
     )
     assert dup.status_code == 400
-    patched = client.patch(
+    patched = spa_client.patch(
         f"/api/v1/rules/{rule.json()['id']}",
         json={
             "code": "R-1",
@@ -103,30 +110,26 @@ def test_rules_crud_and_rule_sets(client: TestClient, project: dict[str, Any], i
     )
     assert patched.status_code == 200 and patched.json()["name"] == "规则一改"
     assert (
-        client.patch(
+        spa_client.patch(
             "/api/v1/rules/99999",
             json={"code": "X", "name": "X", "category": "drafting", "checker_type": "filename_convention"},
         ).status_code
         == 404
     )
-    assert client.get("/api/v1/rules", params={"category": "drafting"}).status_code == 200
+    assert spa_client.get("/api/v1/rules", params={"category": "drafting"}).status_code == 200
 
-    assert client.post("/api/v1/rule-sets", json={"name": "全局集"}).status_code == 201
-    rs = client.post(
-        "/api/v1/rule-sets", json={"name": "项目集", "project_id": project["id"], "rule_ids": [rule.json()["id"]]}
+    assert spa_client.post("/api/v1/rule-sets", json={"name": "全局集"}).status_code == 201
+    rs = spa_client.post(
+        "/api/v1/rule-sets",
+        json={"name": "项目集", "project_id": project.json()["id"], "rule_ids": [rule.json()["id"]]},
     )
     assert rs.status_code == 201, rs.text
-    assert len(client.get("/api/v1/rule-sets", params={"project_id": project["id"]}).json()) == 2
+    assert len(spa_client.get("/api/v1/rule-sets", params={"project_id": project.json()["id"]}).json()) == 2
 
     # 绑定与独立触发端点已移除（SPA 挂载下 GET→404 / POST→405 守卫）
+    assert spa_client.post(f"/api/v1/rule-sets/{rs.json()['id']}/bind", json={"iteration_id": iid}).status_code == 405
     assert (
-        client.post(f"/api/v1/rule-sets/{rs.json()['id']}/bind", json={"iteration_id": iteration["id"]}).status_code
-        == 405
-    )
-    assert (
-        client.post(
-            f"/api/v1/iterations/{iteration['id']}/check-runs", json={"rule_set_id": rs.json()["id"]}
-        ).status_code
+        spa_client.post(f"/api/v1/iterations/{iid}/check-runs", json={"rule_set_id": rs.json()["id"]}).status_code
         == 405
     )
 

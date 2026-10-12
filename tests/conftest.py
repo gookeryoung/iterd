@@ -30,9 +30,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path, None
     stmod.reset_storage()
 
 
-@pytest.fixture()
-def client(env: Path) -> Generator[TestClient, None, None]:
-    """带管理员登录态的测试客户端（启用进程内 worker，预置 designer 用户）。"""
+def _build_test_client() -> Generator[TestClient, None, None]:
+    """创建带管理员登录态的客户端（启用进程内 worker，预置 designer 用户）。"""
     from iterd.app import create_app
 
     application = create_app()
@@ -43,6 +42,27 @@ def client(env: Path) -> Generator[TestClient, None, None]:
         if created.status_code == 201:
             pass  # 已存在则忽略
         yield http
+
+
+@pytest.fixture()
+def client(env: Path) -> Generator[TestClient, None, None]:
+    """带管理员登录态的测试客户端（启用进程内 worker，预置 designer 用户）。"""
+    yield from _build_test_client()
+
+
+@pytest.fixture()
+def spa_client(env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
+    """SPA 已挂载的测试客户端：在临时目录伪造前端构建产物并重定向静态目录解析.
+
+    用于验证已移除端点在 SPA 托管下的 404/405 行为，不依赖真实前端构建产物。
+    """
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><html><body>spa</body></html>", encoding="utf-8")
+    import iterd.app as app_module
+
+    monkeypatch.setattr(app_module, "__file__", str(tmp_path / "app.py"))
+    yield from _build_test_client()
 
 
 def login_as(client: TestClient, username: str, password: str) -> None:

@@ -166,9 +166,13 @@ def test_iteration_time_window(client: TestClient, project: dict[str, Any]) -> N
     assert updated.json()["end_date"] == "2026-02-28"
 
 
-def test_iteration_baselines_removed(client: TestClient, iteration: dict[str, Any]) -> None:
-    """基线功能已移除：GET 404 / POST 405（迁移 0004 破坏性变更的回归守卫）."""
-    iid = iteration["id"]
-    assert client.get(f"/api/v1/iterations/{iid}/baselines").status_code == 404
-    assert client.post(f"/api/v1/iterations/{iid}/baselines", json={"name": "BL"}).status_code == 405
-    assert client.get("/api/v1/baselines/1").status_code == 404
+def test_iteration_baselines_removed(spa_client: TestClient) -> None:
+    """基线功能已移除：GET 404 / POST 405（迁移 0004 破坏性变更的回归守卫，SPA 挂载环境）."""
+    project = spa_client.post("/api/v1/projects", json={"code": "P1", "name": "项目一"})
+    assert project.status_code == 201, project.text
+    created = spa_client.post(f"/api/v1/projects/{project.json()['id']}/iterations", json={"title": "迭代一"})
+    assert created.status_code == 201, created.text
+    iid = created.json()["id"]
+    assert spa_client.get(f"/api/v1/iterations/{iid}/baselines").status_code == 404
+    assert spa_client.post(f"/api/v1/iterations/{iid}/baselines", json={"name": "BL"}).status_code == 405
+    assert spa_client.get("/api/v1/baselines/1").status_code == 404
